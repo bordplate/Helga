@@ -391,7 +391,9 @@ class Agent:
             else self.eps_min
 
         if terminal_learn:
-            self.Q_eval.scheduler.step(average_reward)
+            # Don't update the scheduler if we're not learning
+            if self.epsilon <= self.eps_min:
+                self.Q_eval.scheduler.step(average_reward)
 
             if enable_wandb:
                 for name, param in self.Q_eval.named_parameters():

@@ -17,3 +17,5 @@ compile_commands.json*
 
 **/models_bak/*
 **/wandb/*
+
+**/__pycache__/*
