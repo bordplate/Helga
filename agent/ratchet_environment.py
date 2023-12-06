@@ -53,8 +53,12 @@ class Vector3(ctypes.Structure):
 
 class RatchetEnvironment:
     def __init__(self):
-        self.checkpoints = [
+        self.checkpoints_template = [
             Vector3(211.14610290527344, 231.3751220703125, 76.0),
+            Vector3(118.8655, 265.8282, 77.0),
+            Vector3(157.5900, 242.4351, 78.0),
+            Vector3(66.0811, 299.7586, 70.0),
+            Vector3(84.4390, 375.6922, 78.0),
             Vector3(74.7129898071289, 292.6900329589844, 68.0),
             Vector3(119.23978424072266, 460.4266357421875, 77.04088592529297),
             Vector3(189.29335021972656, 429.5045471191406, 68.0),
@@ -62,6 +66,8 @@ class RatchetEnvironment:
             Vector3(338.6705017089844, 401.8573303222656, 74.0),
             Vector3(246.55624389648438, 284.5892028808594, 76.0)
         ]
+
+        self.checkpoints = []
 
         self.process_handle = None
         self.must_restart = False
@@ -341,6 +347,13 @@ class RatchetEnvironment:
         self.checkpoint = 0
         self.jump_debounce = 0
 
+        # Create checkpoints from self.checkpoint_template and jitter them slightly to make them harder to memorize
+        self.checkpoints = []
+        for checkpoint in self.checkpoints_template:
+            self.checkpoints.append(Vector3(checkpoint.x + np.random.uniform(-1, 1),
+                                            checkpoint.y + np.random.uniform(-1, 1),
+                                            checkpoint.z))
+
         self.frames_moving_away_from_skid = 0
 
         self.currently_dead = False
@@ -359,7 +372,8 @@ class RatchetEnvironment:
             'rewards/wall_crash_penalty': 0,
             'rewards/tnt_crash_penalty': 0,
             'rewards/void_penalty': 0,
-            'rewards/stall_penalty': 0
+            'rewards/stall_penalty': 0,
+            'rewards/reached_checkpoint_reward': 0
         }
 
         self.distance_from_skid_per_step = []
@@ -434,8 +448,8 @@ class RatchetEnvironment:
             self.frames_moving_away_from_skid = 20
 
         if new_distance_from_checkpoint < old_distance_from_checkpoint:
-            self.reward_counters['rewards/distance_from_checkpoint_reward'] += 0.05 + (old_distance_from_checkpoint - new_distance_from_checkpoint) * 0.1
-            reward += 0.05 + (old_distance_from_checkpoint - new_distance_from_checkpoint) * 0.1
+            self.reward_counters['rewards/distance_from_checkpoint_reward'] += 0.005 + (old_distance_from_checkpoint - new_distance_from_checkpoint) * 0.25
+            reward += 0.005 + (old_distance_from_checkpoint - new_distance_from_checkpoint) * 0.25
             self.frames_moving_away_from_skid -= 0
         else:
             self.frames_moving_away_from_skid += 1
@@ -448,6 +462,9 @@ class RatchetEnvironment:
             self.checkpoint += 1
             if self.checkpoint >= len(self.checkpoints):
                 self.checkpoint = 0
+
+            self.reward_counters['rewards/reached_checkpoint_reward'] += 0.8
+            reward += 0.8
 
             next_checkpoint_position = self.checkpoints[self.checkpoint]
 

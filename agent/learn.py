@@ -58,11 +58,14 @@ if __name__ == '__main__':
 
     sequence_length = 30
 
-    learning_rate = 0.00020
+    learning_rate = 0.0006
     features = 24
     batch_size = 128
     train_frequency = 4
-    target_update_frequency = 150
+    target_update_frequency = 1000
+
+    steps_since_update = 0
+    steps_since_learn = 0
 
     # learning_rate_schedule = {
     #     500: 1e-3,
@@ -161,9 +164,8 @@ if __name__ == '__main__':
 
             observation_sequence = new_observation_sequence
 
-            if steps % train_frequency == 0:
-                loss = agent.learn()
-                losses.append(loss)
+            steps_since_update += 1
+            steps_since_learn += 1
 
             accumulated_reward += reward
 
@@ -172,6 +174,19 @@ if __name__ == '__main__':
 
             if total_steps % target_update_frequency == 0:
                 agent.update_target_network()
+
+        # for i in range(int(steps_since_learn / train_frequency)-1):
+        #     loss = agent.learn()
+        #     losses.append(loss)
+
+        loss = agent.learn(num_batches=max(1, int(steps_since_learn / train_frequency)), terminal_learn=True, average_reward=accumulated_reward)
+        losses.append(loss)
+
+        steps_since_learn = 0
+
+        if steps_since_update > target_update_frequency:
+            agent.update_target_network()
+            steps_since_update = 0
 
         avg_score = np.mean(scores[-100:])
 

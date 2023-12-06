@@ -96,7 +96,7 @@ class DeepQNetwork(nn.Module):
         # self.lstm = nn.LSTM(feature_count, lstm_units, num_layers, batch_first=True)
         self.lstm = nn.LSTM(feature_count, lstm_units, num_layers, batch_first=True)
         # self.attention = Attention(self.hidden_dims_halved,)
-        self.attention = MultiHeadAttention(lstm_units, 8)
+        # self.attention = MultiHeadAttention(lstm_units, 8)
 
         self.fc1 = nn.Linear(lstm_units, self.hidden_dims)
         self.bn1 = nn.BatchNorm1d(self.hidden_dims)
@@ -158,10 +158,10 @@ class DeepQNetwork(nn.Module):
         # LSTM
         out, (hidden_state, cell_state) = self.lstm(state, (hidden_state, cell_state))
         # context_vector, attention_weights = self.attention(out, out, out)
-        context_vector, attention_weights = self.attention(out)
+        # context_vector, attention_weights = self.attention(out)
 
-        x = F.leaky_relu(self.fc1(context_vector[:, -1, :]), 0.01)
-        # x = F.relu(self.fc1(out[:, -1, :]))
+        # x = F.leaky_relu(self.fc1(context_vector[:, -1, :]), 0.01)
+        x = F.leaky_relu(self.fc1(out[:, -1, :]), 0.01)
         x = self.bn1(x)
 
         x = F.leaky_relu(self.fc2(x), 0.01)
@@ -172,8 +172,8 @@ class DeepQNetwork(nn.Module):
 
         actions = self.fc4(x)
 
-        if attention:
-            return actions, attention_weights, (hidden_state, cell_state)
+        # if attention:
+        #     return actions, attention_weights, (hidden_state, cell_state)
 
         return actions, (hidden_state, cell_state)
 
@@ -193,6 +193,7 @@ class Agent:
         self.mem_size = max_mem_size
         self.batch_size = batch_size
         self.sequence_length = sequence_length
+        self.learn_length = 10
 
         self.action_space = [i for i in range(n_actions)]
         self.mem_cntr = 0
@@ -242,11 +243,11 @@ class Agent:
         self.action_memory[index] = action
         self.terminal_memory[index] = done
 
-        keyframe_index = index - (index % 100)
+        keyframe_index = index - (index % self.learn_length)
 
         # Store LSTM hidden and cell states every keyframe
-        if self.mem_cntr % 100 == 0 and self.hidden_state is not None and self.cell_state is not None:
-            num_states = np.random.randint(10, 90)
+        if self.mem_cntr % self.learn_length == 0 and self.hidden_state is not None and self.cell_state is not None:
+            num_states = np.random.randint(5, self.learn_length-1)
             self.keyframe_size[index] = num_states
 
             self.hidden_state_memory[index] = self.hidden_state.detach().clone().to(self.Q_eval.device)
@@ -281,8 +282,10 @@ class Agent:
 
         return action
 
-    def learn(self, terminal_learn=False, average_reward=0.0):
-        if self.mem_cntr < self.batch_size or self.mem_cntr < 400:
+    def learn(self, num_batches=1, terminal_learn=False, average_reward=0.0):
+        batch_size = self.batch_size * num_batches
+
+        if self.mem_cntr < batch_size or self.mem_cntr < 400:
             return 0
 
         if terminal_learn:
@@ -290,15 +293,15 @@ class Agent:
 
         self.Q_eval.train()
         self.Q_eval.optimizer.zero_grad()
-        max_mem = int(min(self.mem_cntr, self.mem_size) / 100)
+        max_mem = int(min(self.mem_cntr, self.mem_size) / self.learn_length)
 
-        if max_mem <= int(self.batch_size / 10) + 1:
+        if max_mem <= int(batch_size / 10) + 1:
             return 0
 
         probabilities = np.linspace(0.000000000001, 1, max_mem)
         probabilities /= probabilities.sum()
 
-        batch = np.random.choice(max_mem, int(self.batch_size/10), replace=False, p=probabilities)
+        batch = np.random.choice(max_mem, int(batch_size/10), replace=False, p=probabilities)
         processed_states = 0
 
         # Accumulators for data and states
@@ -308,15 +311,15 @@ class Agent:
         hidden_states_next, cell_states_next = [], []
 
         for batch_index in batch:
-            if processed_states > self.batch_size:
+            if processed_states > batch_size:
                 break
 
             processed_states += 1
 
-            keyframe_index = batch_index * 100
+            keyframe_index = batch_index * self.learn_length
             num_states = self.keyframe_size[keyframe_index]
 
-            if keyframe_index + num_states > self.mem_cntr or keyframe_index + num_states > self.mem_size or num_states < 5:
+            if keyframe_index + num_states > self.mem_cntr or keyframe_index + num_states > self.mem_size or num_states < 3:
                 continue
 
             sequential_batch = np.arange(keyframe_index + 1, keyframe_index + num_states)
@@ -387,8 +390,9 @@ class Agent:
 
         self.Q_eval.optimizer.step()
 
-        self.epsilon = self.epsilon - self.eps_dec if self.epsilon > self.eps_min \
-            else self.eps_min
+        for _ in range(num_batches):
+            self.epsilon = self.epsilon - self.eps_dec if self.epsilon > self.eps_min \
+                else self.eps_min
 
         if terminal_learn:
             # Don't update the scheduler if we're not learning
