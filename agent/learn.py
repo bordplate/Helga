@@ -59,7 +59,7 @@ if __name__ == '__main__':
     sequence_length = 30
 
     learning_rate = 0.0006
-    features = 24
+    features = 23
     batch_size = 128
     train_frequency = 4
     target_update_frequency = 1000

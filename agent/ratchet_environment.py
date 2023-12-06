@@ -57,9 +57,8 @@ class RatchetEnvironment:
             Vector3(211.14610290527344, 231.3751220703125, 76.0),
             Vector3(118.8655, 265.8282, 77.0),
             Vector3(157.5900, 242.4351, 78.0),
-            Vector3(66.0811, 299.7586, 70.0),
-            Vector3(84.4390, 375.6922, 78.0),
             Vector3(74.7129898071289, 292.6900329589844, 68.0),
+            Vector3(84.4390, 375.6922, 78.0),
             Vector3(119.23978424072266, 460.4266357421875, 77.04088592529297),
             Vector3(189.29335021972656, 429.5045471191406, 68.0),
             Vector3(282.83135986328125, 444.8203430175781, 65.76412200927734),
@@ -448,9 +447,10 @@ class RatchetEnvironment:
             self.frames_moving_away_from_skid = 20
 
         if new_distance_from_checkpoint < old_distance_from_checkpoint:
-            self.reward_counters['rewards/distance_from_checkpoint_reward'] += 0.005 + (old_distance_from_checkpoint - new_distance_from_checkpoint) * 0.25
-            reward += 0.005 + (old_distance_from_checkpoint - new_distance_from_checkpoint) * 0.25
-            self.frames_moving_away_from_skid -= 0
+            if old_distance_from_checkpoint - new_distance_from_checkpoint < 2:
+                self.reward_counters['rewards/distance_from_checkpoint_reward'] += 0.005 + (old_distance_from_checkpoint - new_distance_from_checkpoint) * 0.15
+                reward += 0.005 + (old_distance_from_checkpoint - new_distance_from_checkpoint) * 0.15
+                self.frames_moving_away_from_skid -= 0
         else:
             self.frames_moving_away_from_skid += 1
 
@@ -467,6 +467,8 @@ class RatchetEnvironment:
             reward += 0.8
 
             next_checkpoint_position = self.checkpoints[self.checkpoint]
+            new_distance_from_checkpoint = self.distance_between_positions_2d(self.get_player_position(),
+                                                                              next_checkpoint_position)
 
         position = self.get_player_position()
         player_rotation = self.get_player_rotation()
@@ -484,13 +486,13 @@ class RatchetEnvironment:
             self.stalled_timer = 0
 
         if speed > 0.25:
-            self.reward_counters['rewards/speed_reward'] += (speed - 0.25) * 0.05
-            reward += (speed - 0.25) * 0.05
+            self.reward_counters['rewards/speed_reward'] += (speed - 0.25) * 0.5
+            reward += (speed - 0.25) * 0.5
 
         # Discourage stalling
         if speed < 0.25:
-            self.reward_counters['rewards/stall_penalty'] += 0.1
-            reward -= 0.1
+            self.reward_counters['rewards/stall_penalty'] += 0.05
+            reward -= 0.05
 
         # Get distance player has moved since last frame to calculate reward
         if self.last_position is not None:
@@ -563,14 +565,14 @@ class RatchetEnvironment:
         coll_f, coll_u, coll_d, coll_l, coll_r, coll_cf, coll_cu, coll_cd, coll_cl, coll_cr = self.get_collisions()
 
         # Penalize various collisions
-        if coll_f != -32.0 and coll_u != -32.0 and coll_f < 3.5 and coll_u < 4.5 and coll_cf == 0:
+        if coll_f != -32.0 and coll_u != -32.0 and coll_f < 10.5 and coll_u < 15.5 and coll_cf == 0:
             reward -= 0.2
             self.reward_counters['rewards/wall_crash_penalty'] += 1
 
         # TNT crate collision
         if (
-                (coll_f != -32.0 and coll_f < 4.5 and coll_cf == 505) or
-                (coll_d != -32.0 and coll_d < 4.5 and coll_cd == 505)
+                (coll_f != -32.0 and coll_f < 10.5 and coll_cf == 505) or
+                (coll_d != -32.0 and coll_d < 5.5 and coll_cd == 505)
         ):
             reward -= 0.2
             self.reward_counters['rewards/tnt_crash_penalty'] += 1
@@ -590,7 +592,7 @@ class RatchetEnvironment:
             normalize_x(player_rotation.z, -20, 20), # 3
             normalize_x(distance_from_ground, -64, 64),  # 4
             normalize_x(speed, 0, 2),  # 5
-            normalize_x(self.timer, 0, 60 * 60 * 60 * 24),  # 6 # 24 hours
+            #normalize_x(self.timer, 0, 60 * 60 * 60 * 24),  # 6 # 24 hours
             normalize_x(new_distance_from_checkpoint, 0, 500),  # 9
             normalize_x(player_state, 0, 255),  # 10
             normalize_x(self.distance_traveled, 0, 100000),  # 11

@@ -92,6 +92,8 @@ class DeepQNetwork(nn.Module):
             nn.BatchNorm1d(2)
         )
 
+        # self.fc0 = nn.Linear(feature_count-10, 16)
+
         # Assuming feature_count is the number of features in each timestep
         # self.lstm = nn.LSTM(feature_count, lstm_units, num_layers, batch_first=True)
         self.lstm = nn.LSTM(feature_count, lstm_units, num_layers, batch_first=True)
@@ -154,6 +156,10 @@ class DeepQNetwork(nn.Module):
         # Concatenate the CNN output with the non-raycasting part of state
         state_without_raycasting = state[:, :, :-10]
         state = T.cat((state_without_raycasting, cnn_out), dim=2)
+
+        # # Process the first 14 features with a fully connected layer
+        # x = F.leaky_relu(self.fc0(state[:, :, :14]))
+        # state = T.cat((x, state[:, :, -10:]), dim=2)
 
         # LSTM
         out, (hidden_state, cell_state) = self.lstm(state, (hidden_state, cell_state))
