@@ -111,13 +111,13 @@ class DeepQNetwork(nn.Module):
         # Output layer
         self.fc4 = nn.Linear(self.hidden_dims_halved, self.n_actions)
 
-        self.optimizer = optim.Adam(self.parameters(), lr=lr, weight_decay=1e-4)
+        self.optimizer = optim.AdamW(self.parameters(), lr=lr, weight_decay=1e-4)
         #self.optimizer = optim.SGD(self.parameters(), lr=lr, momentum=0.9, weight_decay=1e-6)
 
         self.scheduler = T.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
             'max',
-            factor=0.9,
+            factor=0.5,
             patience=150,
             threshold=0.1,
             threshold_mode='abs'
