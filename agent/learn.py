@@ -2,7 +2,6 @@ from agent import Agent
 from ratchet_environment import RatchetEnvironment
 from watchdog import Watchdog
 
-import time
 import numpy as np
 import wandb
 
@@ -58,19 +57,14 @@ if __name__ == '__main__':
 
     sequence_length = 30
 
-    learning_rate = 0.0006
+    learning_rate = 0.0001
     features = 23
-    batch_size = 128
+    batch_size = 64
     train_frequency = 4
-    target_update_frequency = 1000
+    target_update_frequency = 10000
 
     steps_since_update = 0
     steps_since_learn = 0
-
-    # learning_rate_schedule = {
-    #     500: 1e-3,
-    #     1000: 1e-3
-    # }
 
     agent = Agent(gamma=0.99, epsilon=1.0, batch_size=batch_size, n_actions=4, eps_end=0.001,
                   input_dims=features, lr=learning_rate, sequence_length=sequence_length)
@@ -117,15 +111,10 @@ if __name__ == '__main__':
     for i in range(n_games):
         done = False
 
-        # if i in learning_rate_schedule:
-        #     for g in agent.Q_eval.optimizer.param_groups:
-        #         g['lr'] = learning_rate_schedule[i]
-
         observation = env.reset()[0]
 
         # Reinitialize the observation_sequence for the new episode
         observation_sequence = np.zeros((sequence_length, features))  # Reset the sequence
-        #new_observation_sequence = np.zeros((sequence_length, features))  # Reset the sequence
 
         # Set the last observation to the initial observation from the environment
         observation_sequence[-1] = observation
@@ -172,14 +161,11 @@ if __name__ == '__main__':
             steps += 1
             total_steps += 1
 
-            if total_steps % target_update_frequency == 0:
-                agent.update_target_network()
+            if steps % train_frequency == 0:
+                loss = agent.learn()
+                losses.append(loss)
 
-        # for i in range(int(steps_since_learn / train_frequency)-1):
-        #     loss = agent.learn()
-        #     losses.append(loss)
-
-        loss = agent.learn(num_batches=max(1, int(steps_since_learn / train_frequency)), terminal_learn=True, average_reward=accumulated_reward)
+        loss = agent.learn(num_batches=1, terminal_learn=True, average_reward=accumulated_reward)
         losses.append(loss)
 
         steps_since_learn = 0
@@ -218,5 +204,5 @@ if __name__ == '__main__':
 
         print('episode:', i, 'steps:', total_steps, 'score: %.2f' % (accumulated_reward),
               'avg score: %.2f' % avg_score, "dist: %.2f" % env.distance_traveled,
-              "loss: %.3f" % np.mean(losses), 'learn_rate: %.5f' % learning_rate,
+              "loss: %.3f" % np.mean(losses), 'learn_rate: %.7f' % learning_rate,
               'eps: %.2f' % agent.epsilon if agent.epsilon > agent.eps_min else '')

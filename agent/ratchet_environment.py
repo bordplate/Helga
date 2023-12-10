@@ -2,6 +2,7 @@ import ctypes
 import ctypes.wintypes as wintypes
 import psutil
 import time
+import struct
 import numpy as np
 
 # Windows API functions
@@ -53,17 +54,39 @@ class Vector3(ctypes.Structure):
 
 class RatchetEnvironment:
     def __init__(self):
+        self.respawn_points_template = [
+            [246.71392822265625, 286.5108337402344, 76.0, -2.0999999046325684],
+            [213.6437530517578, 232.98785400390625, 76.0, -2.4504120349884033],
+            [168.9180450439453, 234.16783142089844, 75.97647857666016, 2.653141736984253],
+            [121.3829345703125, 262.2883605957031, 76.0, 2.6097559928894043],
+            [73.7027587890625, 293.1028747558594, 68.0, 2.4544992446899414],
+            [81.04218292236328, 370.8876953125, 68.0, 1.3124659061431885],
+            [100.66133117675781, 422.2431640625, 68.0, 1.1865549087524414],
+            [129.94361877441406, 464.2681579589844, 68.0, -0.11008650064468384],
+            [167.47509765625, 447.53363037109375, 70.28053283691406, -0.8356158137321472],
+            [199.3822784423828, 425.5357360839844, 68.0, -0.25240403413772583],
+            [251.841064453125, 437.9490966796875, 65.90913391113281, 0.2297039031982422],
+            [304.7581481933594, 451.1502990722656, 67.72925567626953, 0.2533050775527954],
+            [341.3725891113281, 435.3643798828125, 71.55968475341797, -1.2392772436141968],
+            [320.5064697265625, 393.40325927734375, 75.61055755615234, -2.582601547241211],
+            [282.5606384277344, 346.9862365722656, 73.0411605834961, -2.1343777179718018]
+        ]
+
         self.checkpoints_template = [
-            Vector3(211.14610290527344, 231.3751220703125, 76.0),
-            Vector3(118.8655, 265.8282, 77.0),
-            Vector3(157.5900, 242.4351, 78.0),
-            Vector3(74.7129898071289, 292.6900329589844, 68.0),
-            Vector3(84.4390, 375.6922, 78.0),
-            Vector3(119.23978424072266, 460.4266357421875, 77.04088592529297),
-            Vector3(189.29335021972656, 429.5045471191406, 68.0),
-            Vector3(282.83135986328125, 444.8203430175781, 65.76412200927734),
-            Vector3(338.6705017089844, 401.8573303222656, 74.0),
-            Vector3(246.55624389648438, 284.5892028808594, 76.0)
+            Vector3(213.6437530517578, 232.98785400390625, 76.0),
+            Vector3(168.9180450439453, 234.16783142089844, 75.97647857666016),
+            Vector3(121.3829345703125, 262.2883605957031, 76.0),
+            Vector3(73.7027587890625, 293.1028747558594, 68.0),
+            Vector3(81.04218292236328, 370.8876953125, 68.0),
+            Vector3(100.66133117675781, 422.2431640625, 68.0),
+            Vector3(129.94361877441406, 464.2681579589844, 68.0),
+            Vector3(167.47509765625, 447.53363037109375, 70.28053283691406),
+            Vector3(199.3822784423828, 425.5357360839844, 68.0),
+            Vector3(251.841064453125, 437.9490966796875, 65.90913391113281),
+            Vector3(304.7581481933594, 451.1502990722656, 67.72925567626953),
+            Vector3(341.3725891113281, 435.3643798828125, 71.55968475341797),
+            Vector3(320.5064697265625, 393.40325927734375, 75.61055755615234),
+            Vector3(282.5606384277344, 346.9862365722656, 73.0411605834961),
         ]
 
         self.checkpoints = []
@@ -136,6 +159,12 @@ class RatchetEnvironment:
         # Convert frame_count to bytes and write back
         value_bytes = value.to_bytes(1, byteorder='big')
         if not self.write_memory(address, value_bytes):
+            print("Failed to write memory.")
+
+    def write_float(self, address, value):
+        # Float doesn't have a to_bytes function, so we use struct.pack
+        value = struct.pack('>f', value)
+        if not self.write_memory(address, value):
             print("Failed to write memory.")
 
     def read_int(self, address):
@@ -331,7 +360,9 @@ class RatchetEnvironment:
         hoverboard_lady_ptr = self.read_int(offset + hoverboard_lady_ptr_address)
         self.write_byte(offset + hoverboard_lady_ptr + 0x20, 3)
         self.write_byte(offset + hoverboard_lady_ptr + 0xbc, 3)
+
         self.set_player_state(0)
+
         self.frame_advance()
         self.set_nanotech(4)
         self.stalled_timer = 0
@@ -345,6 +376,13 @@ class RatchetEnvironment:
         self.height_lost = 0.0
         self.checkpoint = 0
         self.jump_debounce = 0
+
+        # Get a random respawn point index
+        # respawn_index = np.random.randint(0, len(self.respawn_points_template))
+        # self.respawn_point = self.respawn_points_template[respawn_index]
+        #
+        # # Rotate respawn points from template
+        # self.respawn_points = self.respawn_points_template[respawn_index:] + self.respawn_points_template[:respawn_index]
 
         # Create checkpoints from self.checkpoint_template and jitter them slightly to make them harder to memorize
         self.checkpoints = []
@@ -381,12 +419,19 @@ class RatchetEnvironment:
         # Clear inputs
         self.write_int(offset + input_address, 0)
 
+        # Set player position and rotation from respawn point
+        # self.write_float(offset + player_position_address, self.respawn_point[0])
+        # self.write_float(offset + player_position_address + 4, self.respawn_point[1])
+        # self.write_float(offset + player_position_address + 8, self.respawn_point[2])
+        # self.write_float(offset + 0x96A554, self.respawn_point[3])
+
         # Frame advance a couple of frames before giving control
         for i in range(10):
             self.frame_advance()
 
+
         # Find Skid
-        self.skid_address = self.read_int(offset + skid_ptr_address)
+        # self.skid_address = self.read_int(offset + skid_ptr_address)
 
         return self.step(0)
 
@@ -428,6 +473,9 @@ class RatchetEnvironment:
         # Check that player is moving towards skid
         old_distance_from_checkpoint = self.distance_between_positions_2d(self.get_player_position(), next_checkpoint_position)
 
+        old_check_delta_x, old_check_delta_y = (next_checkpoint_position.x - self.get_player_position().x,
+                                                next_checkpoint_position.y - self.get_player_position().y)
+
         # Advance frame
         if not self.frame_advance() or not self.frame_advance():
             reward -= 1.0
@@ -436,6 +484,8 @@ class RatchetEnvironment:
 
         check_delta_x, check_delta_y = (next_checkpoint_position.x - self.get_player_position().x,
                                         next_checkpoint_position.y - self.get_player_position().y)
+
+        check_delta_x, check_delta_y = old_check_delta_x - check_delta_x, old_check_delta_y - check_delta_y
 
         check_delta_x, check_delta_y = max(-1, min(1, check_delta_x)), max(-1, min(1, check_delta_y))
 
@@ -448,14 +498,14 @@ class RatchetEnvironment:
 
         if new_distance_from_checkpoint < old_distance_from_checkpoint:
             if old_distance_from_checkpoint - new_distance_from_checkpoint < 2:
-                self.reward_counters['rewards/distance_from_checkpoint_reward'] += 0.005 + (old_distance_from_checkpoint - new_distance_from_checkpoint) * 0.15
-                reward += 0.005 + (old_distance_from_checkpoint - new_distance_from_checkpoint) * 0.15
+                self.reward_counters['rewards/distance_from_checkpoint_reward'] += (old_distance_from_checkpoint - new_distance_from_checkpoint) * 0.075
+                reward += (old_distance_from_checkpoint - new_distance_from_checkpoint) * 0.075
                 self.frames_moving_away_from_skid -= 0
         else:
             self.frames_moving_away_from_skid += 1
 
-            self.reward_counters['rewards/distance_from_checkpoint_penalty'] += 0.005 + (self.frames_moving_away_from_skid * 0.01)
-            reward -= 0.005 + (self.frames_moving_away_from_skid * 0.01)
+            self.reward_counters['rewards/distance_from_checkpoint_penalty'] += 0.005 + (self.frames_moving_away_from_skid * 0.001)
+            reward -= 0.005 + (self.frames_moving_away_from_skid * 0.001)
 
         # If agent is within 20 units of checkpoint, go to next checkpoint or loop around
         if new_distance_from_checkpoint < 15:
@@ -486,11 +536,11 @@ class RatchetEnvironment:
             self.stalled_timer = 0
 
         if speed > 0.25:
-            self.reward_counters['rewards/speed_reward'] += (speed - 0.25) * 0.5
-            reward += (speed - 0.25) * 0.5
+            self.reward_counters['rewards/speed_reward'] += (speed - 0.25) * 0.05
+            reward += (speed - 0.25) * 0.05
 
         # Discourage stalling
-        if speed < 0.25:
+        if speed < 0.22 and self.timer > 30:
             self.reward_counters['rewards/stall_penalty'] += 0.05
             reward -= 0.05
 
@@ -566,8 +616,8 @@ class RatchetEnvironment:
 
         # Penalize various collisions
         if coll_f != -32.0 and coll_u != -32.0 and coll_f < 10.5 and coll_u < 15.5 and coll_cf == 0:
-            reward -= 0.2
-            self.reward_counters['rewards/wall_crash_penalty'] += 1
+            reward -= 0.1
+            self.reward_counters['rewards/wall_crash_penalty'] += 0.1
 
         # TNT crate collision
         if (
@@ -631,6 +681,8 @@ if __name__ == '__main__':
         steps = 0
         next_frame_time = time.time()
 
+        env.reset()
+
         last_checkpoint = None
 
         while True:
@@ -642,10 +694,10 @@ if __name__ == '__main__':
 
             input()
 
-            print(f"Collisions:", *env.get_collisions())
+            # print(f"Collisions:", *env.get_collisions())
 
-            # current_position = env.get_player_position()
-            # print(f"Vector3({current_position.x}, {current_position.y}, {current_position.z}),", end="")
+            current_position = env.get_player_position()
+            print(f"[{current_position.x}, {current_position.y}, {current_position.z}, {env.get_player_rotation().z}],", end="")
 
             # if last_checkpoint is None:
             #     last_checkpoint = env.get_player_position()

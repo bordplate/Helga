@@ -73,7 +73,7 @@ class Attention(nn.Module):
 
 
 class DeepQNetwork(nn.Module):
-    def __init__(self, lr, feature_count, hidden_dims, n_actions, num_layers=2, lstm_units=64):
+    def __init__(self, lr, feature_count, hidden_dims, n_actions, num_layers=3, lstm_units=256):
         super(DeepQNetwork, self).__init__()
 
         self.hidden_dims = hidden_dims
@@ -84,13 +84,13 @@ class DeepQNetwork(nn.Module):
 
         #T.autograd.set_detect_anomaly(True)
 
-        self.raycast_cnn = nn.Sequential(
-            nn.Conv1d(in_channels=2, out_channels=16, kernel_size=2, stride=1),
-            nn.LeakyReLU(),
-            nn.Conv1d(in_channels=16, out_channels=2, kernel_size=2, stride=1, padding=1),
-            nn.LeakyReLU(),
-            nn.BatchNorm1d(2)
-        )
+        # self.raycast_cnn = nn.Sequential(
+        #     nn.Conv1d(in_channels=2, out_channels=16, kernel_size=2, stride=1),
+        #     nn.LeakyReLU(),
+        #     nn.Conv1d(in_channels=16, out_channels=2, kernel_size=2, stride=1, padding=1),
+        #     nn.LeakyReLU(),
+        #     nn.BatchNorm1d(2)
+        # )
 
         # self.fc0 = nn.Linear(feature_count-10, 16)
 
@@ -100,16 +100,19 @@ class DeepQNetwork(nn.Module):
         # self.attention = Attention(self.hidden_dims_halved,)
         # self.attention = MultiHeadAttention(lstm_units, 8)
 
-        self.fc1 = nn.Linear(lstm_units, self.hidden_dims)
+        self.fc0 = nn.Linear(lstm_units, self.hidden_dims)
+        self.bn0 = nn.BatchNorm1d(self.hidden_dims)
+
+        self.fc1 = nn.Linear(self.hidden_dims, self.hidden_dims)
         self.bn1 = nn.BatchNorm1d(self.hidden_dims)
         self.fc2 = nn.Linear(self.hidden_dims, self.hidden_dims)
         self.bn2 = nn.BatchNorm1d(self.hidden_dims)
 
-        self.fc3 = nn.Linear(self.hidden_dims, self.hidden_dims_halved)
-        self.bn3 = nn.BatchNorm1d(self.hidden_dims_halved)
+        self.fc3 = nn.Linear(self.hidden_dims, self.hidden_dims)
+        self.bn3 = nn.BatchNorm1d(self.hidden_dims)
 
         # Output layer
-        self.fc4 = nn.Linear(self.hidden_dims_halved, self.n_actions)
+        self.fc4 = nn.Linear(self.hidden_dims, self.n_actions)
 
         self.optimizer = optim.AdamW(self.parameters(), lr=lr, weight_decay=1e-4)
         #self.optimizer = optim.SGD(self.parameters(), lr=lr, momentum=0.9, weight_decay=1e-6)
@@ -117,9 +120,9 @@ class DeepQNetwork(nn.Module):
         self.scheduler = T.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
             'max',
-            factor=0.5,
-            patience=150,
-            threshold=0.1,
+            factor=0.95,
+            patience=300,
+            threshold=0.5,
             threshold_mode='abs'
         )
 
@@ -138,24 +141,24 @@ class DeepQNetwork(nn.Module):
         # Parts of the state gets pre-processed by a CNN
 
         # Raycast states are the last 10 features of each observation
-        batch_size, num_observations, feature_size = state.shape
-
-        # Separate the raycasting data
-        raycasting_data = state[:, :, -10:]  # Last 10 features are raycasting data
-
-        # Reshape for batch processing:
-        # New shape: [batch_size * num_observations, 2, 5]
-        raycasting_data = raycasting_data.reshape(-1, 2, 5)
-
-        # Process all raycasting data through the CNN in one go
-        cnn_out = self.raycast_cnn(raycasting_data)
-
-        # Reshape the CNN output back to [batch_size, num_observations, new_feature_size]
-        cnn_out = cnn_out.reshape(batch_size, num_observations, -1)
-
-        # Concatenate the CNN output with the non-raycasting part of state
-        state_without_raycasting = state[:, :, :-10]
-        state = T.cat((state_without_raycasting, cnn_out), dim=2)
+        # batch_size, num_observations, feature_size = state.shape
+        #
+        # # Separate the raycasting data
+        # raycasting_data = state[:, :, -10:]  # Last 10 features are raycasting data
+        #
+        # # Reshape for batch processing:
+        # # New shape: [batch_size * num_observations, 2, 5]
+        # raycasting_data = raycasting_data.reshape(-1, 2, 5)
+        #
+        # # Process all raycasting data through the CNN in one go
+        # cnn_out = self.raycast_cnn(raycasting_data)
+        #
+        # # Reshape the CNN output back to [batch_size, num_observations, new_feature_size]
+        # cnn_out = cnn_out.reshape(batch_size, num_observations, -1)
+        #
+        # # Concatenate the CNN output with the non-raycasting part of state
+        # state_without_raycasting = state[:, :, :-10]
+        # state = T.cat((state_without_raycasting, cnn_out), dim=2)
 
         # # Process the first 14 features with a fully connected layer
         # x = F.leaky_relu(self.fc0(state[:, :, :14]))
@@ -167,7 +170,10 @@ class DeepQNetwork(nn.Module):
         # context_vector, attention_weights = self.attention(out)
 
         # x = F.leaky_relu(self.fc1(context_vector[:, -1, :]), 0.01)
-        x = F.leaky_relu(self.fc1(out[:, -1, :]), 0.01)
+        x = F.leaky_relu(self.fc0(out[:, -1, :]), 0.01)
+        x = self.bn0(x)
+
+        x = F.leaky_relu(self.fc1(x), 0.01)
         x = self.bn1(x)
 
         x = F.leaky_relu(self.fc2(x), 0.01)
@@ -190,7 +196,7 @@ class DeepQNetwork(nn.Module):
 
 class Agent:
     def __init__(self, gamma, epsilon, lr, input_dims, batch_size, n_actions,
-                 max_mem_size=100000, eps_end=0.001, eps_dec=6e-4, sequence_length=5):
+                 max_mem_size=500000, eps_end=0.001, eps_dec=6e-4, sequence_length=5):
         self.gamma = gamma
         self.epsilon = epsilon
         self.eps_min = eps_end
@@ -204,8 +210,8 @@ class Agent:
         self.action_space = [i for i in range(n_actions)]
         self.mem_cntr = 0
 
-        self.Q_eval = DeepQNetwork(lr=lr, feature_count=input_dims, hidden_dims=512, n_actions=n_actions)
-        self.Q_target = DeepQNetwork(lr=lr, feature_count=input_dims, hidden_dims=512, n_actions=n_actions)
+        self.Q_eval = DeepQNetwork(lr=lr, feature_count=input_dims, hidden_dims=256, n_actions=n_actions)
+        self.Q_target = DeepQNetwork(lr=lr, feature_count=input_dims, hidden_dims=256, n_actions=n_actions)
         self.Q_target.freeze()
         self.update_target_network()
 
@@ -258,7 +264,7 @@ class Agent:
 
             self.hidden_state_memory[index] = self.hidden_state.detach().clone().to(self.Q_eval.device)
             self.cell_state_memory[index] = self.cell_state.detach().clone().to(self.Q_eval.device)
-        elif index % 100 <= self.keyframe_size[keyframe_index]:
+        elif index % self.learn_length <= self.keyframe_size[keyframe_index]:
             # Make sure we don't cross episode boundaries
             if done:
                 self.keyframe_size[keyframe_index] = index - keyframe_index
@@ -301,13 +307,13 @@ class Agent:
         self.Q_eval.optimizer.zero_grad()
         max_mem = int(min(self.mem_cntr, self.mem_size) / self.learn_length)
 
-        if max_mem <= int(batch_size / 10) + 1:
+        if max_mem <= int(batch_size) + 1:
             return 0
 
-        probabilities = np.linspace(0.000000000001, 1, max_mem)
-        probabilities /= probabilities.sum()
+        # probabilities = np.linspace(0.000000000001, 1, max_mem)
+        # probabilities /= probabilities.sum()
 
-        batch = np.random.choice(max_mem, int(batch_size/10), replace=False, p=probabilities)
+        batch = np.random.choice(max_mem, int(batch_size), replace=False)
         processed_states = 0
 
         # Accumulators for data and states
@@ -338,7 +344,7 @@ class Agent:
             reward_batches.append(T.tensor(self.reward_memory[sequential_batch]).to(self.Q_eval.device))
             terminal_batches.append(T.tensor(self.terminal_memory[sequential_batch]).to(self.Q_eval.device))
 
-            # Accumulate states
+            # Get the previous hidden and cell states of the LSTM for the current batch
             hidden_states.append(T.cat([self.hidden_state_memory[idx - 1] if self.hidden_state_memory[
                                                                                  idx - 1] is not None else T.zeros(
                 self.Q_eval.num_layers, 1, self.Q_eval.lstm_units).to(self.Q_eval.device) for idx in sequential_batch], dim=1))
@@ -346,6 +352,7 @@ class Agent:
                                                                              idx - 1] is not None else T.zeros(
                 self.Q_eval.num_layers, 1, self.Q_eval.lstm_units).to(self.Q_eval.device) for idx in sequential_batch], dim=1))
 
+            # Get the next hidden and cell states of the LSTM for the current batch
             hidden_states_next.append(T.cat([self.hidden_state_memory[idx] if self.hidden_state_memory[
                                                                                     idx] is not None else T.zeros(
                     self.Q_eval.num_layers, 1, self.Q_eval.lstm_units).to(self.Q_eval.device) for idx in sequential_batch], dim=1))
@@ -388,9 +395,9 @@ class Agent:
         if terminal_learn and enable_wandb:
             for name, param in self.Q_eval.named_parameters():
                 if param.grad is not None:
-                    grad_norm = param.grad.data.norm(2).item()
+                    # grad_norm = param.grad.data.norm(2).item()
                     wandb.log({f"grad/{name}": wandb.Histogram(param.grad.cpu().numpy())}, commit=False)
-                    wandb.log({f"grad/{name}_norm": grad_norm}, commit=False)
+                    # wandb.log({f"grad/{name}_norm": grad_norm}, commit=False)
 
         T.nn.utils.clip_grad_norm_(self.Q_eval.parameters(), max_norm=0.5)
 
