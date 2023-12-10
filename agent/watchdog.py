@@ -31,14 +31,6 @@ class Watchdog:
         while True:
             self.last_frame_count_time += 1
 
-            # Get RPCS3 from the process list
-            # import psutil
-            rpcs3 = None
-            # for proc in psutil.process_iter():
-            #     if proc.name() == "rpcs3.exe":
-            #         rpcs3 = proc
-            #         break
-
             if (self.last_frame_count == self.env.last_frame_count and self.last_frame_count_time > 15):
                 # RPCS3 has likely crashed, restart it
                 print("Watchdog: Environment has stalled, restarting it...")

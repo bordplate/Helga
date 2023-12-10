@@ -12,66 +12,6 @@ import sys
 enable_wandb = "pydevd" not in sys.modules
 
 
-class MultiHeadAttention(nn.Module):
-    def __init__(self, hidden_dims, num_heads):
-        super(MultiHeadAttention, self).__init__()
-        self.num_heads = num_heads
-        self.hidden_dims = hidden_dims
-        self.head_dim = hidden_dims // num_heads
-
-        assert (
-            self.head_dim * num_heads == hidden_dims
-        ), "Embedding size must be divisible by num_heads"
-
-        self.scaling = self.head_dim ** -0.5
-
-        self.query_linear = nn.Linear(hidden_dims, hidden_dims)
-        self.key_linear = nn.Linear(hidden_dims, hidden_dims)
-        self.value_linear = nn.Linear(hidden_dims, hidden_dims)
-
-        self.fc_out = nn.Linear(hidden_dims, hidden_dims)
-
-    def forward(self, lstm_output):
-        batch_size = lstm_output.shape[0]
-        query = self.query_linear(lstm_output)
-        key = self.key_linear(lstm_output)
-        value = self.value_linear(lstm_output)
-
-        query = query.view(batch_size, -1, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
-        key = key.view(batch_size, -1, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
-        value = value.view(batch_size, -1, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
-
-        energy = T.matmul(query, key.permute(0, 1, 3, 2)) * self.scaling
-        attention = T.softmax(energy, dim=-1)
-
-        out = T.matmul(attention, value).permute(0, 2, 1, 3).contiguous()
-        out = out.view(batch_size, -1, self.hidden_dims)
-        out = self.fc_out(out)
-
-        return out, attention
-
-
-class Attention(nn.Module):
-    def __init__(self, hidden_dims):
-        super(Attention, self).__init__()
-        # Use a linear layer to transform the LSTM output
-        self.linear = nn.Linear(hidden_dims, hidden_dims)
-        # Another linear layer to compute the attention scores
-        self.attention_score = nn.Linear(hidden_dims, 1)
-
-    def forward(self, lstm_output):
-        # lstm_output shape: (batch, seq_len, hidden_dims)
-        # Transform lstm_output
-        transformed_output = T.tanh(self.linear(lstm_output))
-        # Compute attention scores for each time step
-        attention_scores = self.attention_score(transformed_output) # Shape: (batch, seq_len, 1)
-        attention_weights = F.softmax(attention_scores, dim=1) # Shape: (batch, seq_len, 1)
-
-        # Compute context vector as the weighted sum of LSTM outputs
-        context_vector = T.sum(lstm_output * attention_weights, dim=1) # Shape: (batch, hidden_dims)
-        return context_vector, attention_weights.squeeze(-1)
-
-
 class DeepQNetwork(nn.Module):
     def __init__(self, lr, feature_count, hidden_dims, n_actions, num_layers=3, lstm_units=256):
         super(DeepQNetwork, self).__init__()
@@ -82,23 +22,7 @@ class DeepQNetwork(nn.Module):
         self.hidden_dims_halved = int(hidden_dims/2)
         self.lstm_units = lstm_units
 
-        #T.autograd.set_detect_anomaly(True)
-
-        # self.raycast_cnn = nn.Sequential(
-        #     nn.Conv1d(in_channels=2, out_channels=16, kernel_size=2, stride=1),
-        #     nn.LeakyReLU(),
-        #     nn.Conv1d(in_channels=16, out_channels=2, kernel_size=2, stride=1, padding=1),
-        #     nn.LeakyReLU(),
-        #     nn.BatchNorm1d(2)
-        # )
-
-        # self.fc0 = nn.Linear(feature_count-10, 16)
-
-        # Assuming feature_count is the number of features in each timestep
-        # self.lstm = nn.LSTM(feature_count, lstm_units, num_layers, batch_first=True)
         self.lstm = nn.LSTM(feature_count, lstm_units, num_layers, batch_first=True)
-        # self.attention = Attention(self.hidden_dims_halved,)
-        # self.attention = MultiHeadAttention(lstm_units, 8)
 
         self.fc0 = nn.Linear(lstm_units, self.hidden_dims)
         self.bn0 = nn.BatchNorm1d(self.hidden_dims)
@@ -115,7 +39,6 @@ class DeepQNetwork(nn.Module):
         self.fc4 = nn.Linear(self.hidden_dims, self.n_actions)
 
         self.optimizer = optim.AdamW(self.parameters(), lr=lr, weight_decay=1e-4)
-        #self.optimizer = optim.SGD(self.parameters(), lr=lr, momentum=0.9, weight_decay=1e-6)
 
         self.scheduler = T.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
@@ -126,50 +49,18 @@ class DeepQNetwork(nn.Module):
             threshold_mode='abs'
         )
 
-        # self.loss = nn.MSELoss()
         self.loss = nn.HuberLoss()
         self.device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
         self.to(self.device)
 
-    def forward(self, state, attention=False, hidden_state=None, cell_state=None):
+    def forward(self, state, hidden_state=None, cell_state=None):
         if hidden_state is None or cell_state is None:
             hidden_state = T.zeros(self.num_layers, state.size(0), self.lstm_units).to(self.device)
             cell_state = T.zeros(self.num_layers, state.size(0), self.lstm_units).to(self.device)
 
-        # Shape of state: [batch_size, num_observations, feature_size]
-
-        # Parts of the state gets pre-processed by a CNN
-
-        # Raycast states are the last 10 features of each observation
-        # batch_size, num_observations, feature_size = state.shape
-        #
-        # # Separate the raycasting data
-        # raycasting_data = state[:, :, -10:]  # Last 10 features are raycasting data
-        #
-        # # Reshape for batch processing:
-        # # New shape: [batch_size * num_observations, 2, 5]
-        # raycasting_data = raycasting_data.reshape(-1, 2, 5)
-        #
-        # # Process all raycasting data through the CNN in one go
-        # cnn_out = self.raycast_cnn(raycasting_data)
-        #
-        # # Reshape the CNN output back to [batch_size, num_observations, new_feature_size]
-        # cnn_out = cnn_out.reshape(batch_size, num_observations, -1)
-        #
-        # # Concatenate the CNN output with the non-raycasting part of state
-        # state_without_raycasting = state[:, :, :-10]
-        # state = T.cat((state_without_raycasting, cnn_out), dim=2)
-
-        # # Process the first 14 features with a fully connected layer
-        # x = F.leaky_relu(self.fc0(state[:, :, :14]))
-        # state = T.cat((x, state[:, :, -10:]), dim=2)
-
         # LSTM
         out, (hidden_state, cell_state) = self.lstm(state, (hidden_state, cell_state))
-        # context_vector, attention_weights = self.attention(out, out, out)
-        # context_vector, attention_weights = self.attention(out)
 
-        # x = F.leaky_relu(self.fc1(context_vector[:, -1, :]), 0.01)
         x = F.leaky_relu(self.fc0(out[:, -1, :]), 0.01)
         x = self.bn0(x)
 
@@ -183,9 +74,6 @@ class DeepQNetwork(nn.Module):
         x = self.bn3(x)
 
         actions = self.fc4(x)
-
-        # if attention:
-        #     return actions, attention_weights, (hidden_state, cell_state)
 
         return actions, (hidden_state, cell_state)
 
@@ -255,6 +143,9 @@ class Agent:
         self.action_memory[index] = action
         self.terminal_memory[index] = done
 
+        # To save memory, we only store the hidden and cell states when we hit "keyframes". When we hit keyframes,
+        #   we choose a random length for the keyframe, and store the hidden and cell states for that many steps.
+
         keyframe_index = index - (index % self.learn_length)
 
         # Store LSTM hidden and cell states every keyframe
@@ -305,13 +196,15 @@ class Agent:
 
         self.Q_eval.train()
         self.Q_eval.optimizer.zero_grad()
+
+        # Because we want to use stored hidden and cell states for the LSTM, the following is (needlessly) complicated.
+        # We start storing sequences of hidden and cell states of various lengths when we hit "keyframes". So instead of
+        #   sampling random batches of states, we sample random batches of keyframes.
+
         max_mem = int(min(self.mem_cntr, self.mem_size) / self.learn_length)
 
         if max_mem <= int(batch_size) + 1:
             return 0
-
-        # probabilities = np.linspace(0.000000000001, 1, max_mem)
-        # probabilities /= probabilities.sum()
 
         batch = np.random.choice(max_mem, int(batch_size), replace=False)
         processed_states = 0
@@ -344,7 +237,7 @@ class Agent:
             reward_batches.append(T.tensor(self.reward_memory[sequential_batch]).to(self.Q_eval.device))
             terminal_batches.append(T.tensor(self.terminal_memory[sequential_batch]).to(self.Q_eval.device))
 
-            # Get the previous hidden and cell states of the LSTM for the current batch
+            # Get the hidden and cell states for the observation preceding the current states
             hidden_states.append(T.cat([self.hidden_state_memory[idx - 1] if self.hidden_state_memory[
                                                                                  idx - 1] is not None else T.zeros(
                 self.Q_eval.num_layers, 1, self.Q_eval.lstm_units).to(self.Q_eval.device) for idx in sequential_batch], dim=1))
@@ -352,7 +245,7 @@ class Agent:
                                                                              idx - 1] is not None else T.zeros(
                 self.Q_eval.num_layers, 1, self.Q_eval.lstm_units).to(self.Q_eval.device) for idx in sequential_batch], dim=1))
 
-            # Get the next hidden and cell states of the LSTM for the current batch
+            # Then we get the hidden and cell states for the current states which correspond to "next" states.
             hidden_states_next.append(T.cat([self.hidden_state_memory[idx] if self.hidden_state_memory[
                                                                                     idx] is not None else T.zeros(
                     self.Q_eval.num_layers, 1, self.Q_eval.lstm_units).to(self.Q_eval.device) for idx in sequential_batch], dim=1))
@@ -376,7 +269,7 @@ class Agent:
         cell_state_next = T.cat(cell_states_next, dim=1)
 
         # Forward pass for current and next state batches
-        actions, (hidden_state, cell_state) = self.Q_eval(state_batch, hidden_state=hidden_state, cell_state=cell_state)
+        actions, _ = self.Q_eval(state_batch, hidden_state=hidden_state, cell_state=cell_state)
         q_eval = actions.gather(1, action_batch.unsqueeze(-1)).squeeze(-1)
 
         q_next, _ = self.Q_eval(new_state_batch, hidden_state=hidden_state_next, cell_state=cell_state_next)
@@ -395,9 +288,7 @@ class Agent:
         if terminal_learn and enable_wandb:
             for name, param in self.Q_eval.named_parameters():
                 if param.grad is not None:
-                    # grad_norm = param.grad.data.norm(2).item()
                     wandb.log({f"grad/{name}": wandb.Histogram(param.grad.cpu().numpy())}, commit=False)
-                    # wandb.log({f"grad/{name}_norm": grad_norm}, commit=False)
 
         T.nn.utils.clip_grad_norm_(self.Q_eval.parameters(), max_norm=0.5)
 

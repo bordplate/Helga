@@ -1,76 +1,13 @@
-import ctypes
-import ctypes.wintypes as wintypes
-import psutil
 import time
-import struct
 import numpy as np
 
-# Windows API functions
-OpenProcess = ctypes.windll.kernel32.OpenProcess
-ReadProcessMemory = ctypes.windll.kernel32.ReadProcessMemory
-WriteProcessMemory = ctypes.windll.kernel32.WriteProcessMemory
-CloseHandle = ctypes.windll.kernel32.CloseHandle
-
-# Constants
-PROCESS_ALL_ACCESS = 0x1F0FFF
-frame_count_address = 0xB00000
-frame_progress_address = 0xB00004
-input_address = 0xB00008
-hoverboard_lady_ptr_address = 0xB00020
-skid_ptr_address = 0xB00024
-coll_forward_address = 0xB00030
-coll_up_address = 0xB00034
-coll_down_addrss = 0xB00050
-coll_left_address = 0xB00038
-coll_right_address = 0xB0003c
-
-coll_class_forward_address = 0xB00040
-coll_class_up_address = 0xB00044
-coll_class_down_address = 0xB00054
-coll_class_left_address = 0xB00048
-coll_class_right_address = 0xB0004c
-
-offset = 0x300000000
-
-player_state_address = 0x96bd64
-player_position_address = 0x969d60
-player_rotation_address = 0x969d70
-dist_from_ground_address = 0x969fbc
-player_speed_address = 0x969e74
-current_planet_address = 0x969C70
-
-
-def normalize_x(x, min, max):
-    normalized_x = 2 * ((x - min) / (max - min)) - 1
-    return normalized_x
-
-
-# Vector3
-class Vector3(ctypes.Structure):
-    _fields_ = [("x", ctypes.c_float),
-                ("y", ctypes.c_float),
-                ("z", ctypes.c_float)]
+from game import Vector3
+from game import Game
 
 
 class RatchetEnvironment:
     def __init__(self):
-        self.respawn_points_template = [
-            [246.71392822265625, 286.5108337402344, 76.0, -2.0999999046325684],
-            [213.6437530517578, 232.98785400390625, 76.0, -2.4504120349884033],
-            [168.9180450439453, 234.16783142089844, 75.97647857666016, 2.653141736984253],
-            [121.3829345703125, 262.2883605957031, 76.0, 2.6097559928894043],
-            [73.7027587890625, 293.1028747558594, 68.0, 2.4544992446899414],
-            [81.04218292236328, 370.8876953125, 68.0, 1.3124659061431885],
-            [100.66133117675781, 422.2431640625, 68.0, 1.1865549087524414],
-            [129.94361877441406, 464.2681579589844, 68.0, -0.11008650064468384],
-            [167.47509765625, 447.53363037109375, 70.28053283691406, -0.8356158137321472],
-            [199.3822784423828, 425.5357360839844, 68.0, -0.25240403413772583],
-            [251.841064453125, 437.9490966796875, 65.90913391113281, 0.2297039031982422],
-            [304.7581481933594, 451.1502990722656, 67.72925567626953, 0.2533050775527954],
-            [341.3725891113281, 435.3643798828125, 71.55968475341797, -1.2392772436141968],
-            [320.5064697265625, 393.40325927734375, 75.61055755615234, -2.582601547241211],
-            [282.5606384277344, 346.9862365722656, 73.0411605834961, -2.1343777179718018]
-        ]
+        self.game = Game()
 
         self.checkpoints_template = [
             Vector3(213.6437530517578, 232.98785400390625, 76.0),
@@ -91,310 +28,50 @@ class RatchetEnvironment:
 
         self.checkpoints = []
 
-        self.process_handle = None
-        self.must_restart = False
-        self.last_frame_count = 0
-
-        self.last_position = None
         self.distance = 0.0
         self.distance_traveled = 0.0
         self.timer = 0
-        self.last_rotation = 0.0
         self.height_lost = 0.0
 
         self.checkpoint = 0
 
-        self.distance_from_skid_per_step = []
+        self.distance_from_checkpoint_per_step = []
 
         self.skid_address = 0
         self.jump_debounce = 0
 
-        self.currently_dead = False
-        self.death_counter = 0
-
         self.stalled_timer = 0
 
-        self.frames_moving_away_from_skid = 0
+        self.frames_moving_away_from_checkpoint = 0
 
-        self.reward_counters = {
-            'rewards/timeout_penalty': 0,
-            'rewards/jump_penalty': 0,
-            'rewards/distance_from_checkpoint_reward': 0,
-            'rewards/distance_from_checkpoint_penalty': 0,
-            'rewards/speed_reward': 0,
-            'rewards/distance_traveled_reward': 0,
-            'rewards/height_loss_penalty': 0,
-            'rewards/death_penalty': 0,
-            'rewards/crash_penalty': 0,
-            'rewards/void_penalty': 0
-        }
+        self.reward_counters = {}
 
-        self.skid_checkpoints = []
-
-    # Function to read memory
-    def read_memory(self, address, size):
-        buffer = ctypes.create_string_buffer(size)
-        bytesRead = ctypes.c_size_t()
-        address = ctypes.c_void_p(address)
-        if ReadProcessMemory(self.process_handle, address, buffer, size, ctypes.byref(bytesRead)):
-            return buffer.raw
-        else:
-            return None
-
-    def write_memory(self, address, data):
-        size = len(data)
-        c_data = ctypes.create_string_buffer(data)
-        bytes_written = ctypes.c_size_t()
-        address = ctypes.c_void_p(address)
-        result = WriteProcessMemory(self.process_handle, address, c_data, size, ctypes.byref(bytes_written))
-        return result
-
-    def write_int(self, address, value):
-        # Convert frame_count to bytes and write back
-        value_bytes = value.to_bytes(4, byteorder='big')
-        if not self.write_memory(address, value_bytes):
-            print("Failed to write memory.")
-
-    def write_byte(self, address, value):
-        # Convert frame_count to bytes and write back
-        value_bytes = value.to_bytes(1, byteorder='big')
-        if not self.write_memory(address, value_bytes):
-            print("Failed to write memory.")
-
-    def write_float(self, address, value):
-        # Float doesn't have a to_bytes function, so we use struct.pack
-        value = struct.pack('>f', value)
-        if not self.write_memory(address, value):
-            print("Failed to write memory.")
-
-    def read_int(self, address):
-        buffer = self.read_memory(address, 4)
-        value = 0
-        if buffer:
-            value = int.from_bytes(buffer, byteorder='big', signed=False)
-        return value
-
-    def read_float(self, address):
-        buffer = self.read_memory(address, 4)
-
-        if buffer is None:
-            return 0.0
-
-        buffer = buffer[::-1]
-        value = 0
-        if buffer:
-            # There's no float.from_bytes function
-            value = ctypes.c_float.from_buffer_copy(buffer).value
-        return value
-
-    def open_process(self):
-        # Find RPCS3 process
-        rpcs3_process = None
-
-        while rpcs3_process is None:
-            for process in psutil.process_iter(['pid', 'name']):
-                if process.info['name'] == 'rpcs3.exe':
-                    rpcs3_process = process
-                    break
-
-            if rpcs3_process is None:
-                print("RPCS3 process not found...")
-            else:
-                self.process_handle = OpenProcess(PROCESS_ALL_ACCESS, False, rpcs3_process.info['pid'])
-                print(f"RPCS3 process found. Handle: {self.process_handle}")
-
+    def start(self):
+        process_opened = self.game.open_process()
+        while not process_opened:
+            print("Waiting for process to open...")
             time.sleep(1)
-
-    def close_process(self):
-        CloseHandle(self.process_handle)
-
-    def get_current_frame_count(self):
-        frames_buffer = self.read_memory(offset + frame_count_address, 4)
-        frame_count = 0
-        if frames_buffer:
-            frame_count = int.from_bytes(frames_buffer, byteorder='big', signed=False)
-
-        return frame_count
-
-    def get_player_state(self):
-        player_state_buffer = self.read_memory(offset + player_state_address, 4)
-        player_state = 0
-        if player_state_buffer:
-            player_state = int.from_bytes(player_state_buffer, byteorder='big', signed=False)
-
-        return player_state
-
-    def set_nanotech(self, nanotech):
-        self.write_byte(offset + 0x96BF8B, nanotech)
-
-    def set_player_state(self, state):
-        self.write_int(offset + player_state_address, state)
-
-    def get_distance_from_ground(self):
-        return self.read_float(offset + dist_from_ground_address)
-
-    def get_player_speed(self):
-        return self.read_float(offset + player_speed_address)
-
-    def get_current_planet(self):
-        return self.read_int(offset + current_planet_address)
-
-    def get_skid_position(self):
-        if self.skid_address == 0:
-            self.skid_address = self.read_int(offset + skid_ptr_address)
-            if self.skid_address == 0:
-                return Vector3()
-
-        skid_position_buffer = self.read_memory(offset + self.skid_address + 0x10, 12)
-
-        if skid_position_buffer is None:
-            return Vector3()
-
-        # Flip each 4 bytes to convert from big endian to little endian
-        skid_position_buffer = (skid_position_buffer[3::-1] +
-                                skid_position_buffer[7:3:-1] +
-                                skid_position_buffer[11:7:-1])
-
-        skid_position = Vector3()
-        ctypes.memmove(ctypes.byref(skid_position), skid_position_buffer, ctypes.sizeof(skid_position))
-
-        return skid_position
-
-    def get_player_position(self):
-        """Player position is stored in big endian, so we need to convert it to little endian."""
-        player_position_buffer = self.read_memory(offset + player_position_address, 12)
-
-        if player_position_buffer is None:
-            return Vector3()
-
-        # Flip each 4 bytes to convert from big endian to little endian
-        player_position_buffer = (player_position_buffer[3::-1] +
-                                  player_position_buffer[7:3:-1] +
-                                  player_position_buffer[11:7:-1])
-
-        player_position = Vector3()
-        ctypes.memmove(ctypes.byref(player_position), player_position_buffer, ctypes.sizeof(player_position))
-
-        return player_position
-
-    def get_player_rotation(self):
-        """Player rotation is stored in big endian, so we need to convert it to little endian."""
-        player_rotation_buffer = self.read_memory(offset + player_rotation_address, 12)
-
-        if player_rotation_buffer is None:
-            return Vector3()
-
-        # Flip each 4 bytes to convert from big endian to little endian
-        player_rotation_buffer = (player_rotation_buffer[3::-1] +
-                                  player_rotation_buffer[7:3:-1] +
-                                  player_rotation_buffer[11:7:-1])
-
-        player_rotation = Vector3()
-        ctypes.memmove(ctypes.byref(player_rotation), player_rotation_buffer, ctypes.sizeof(player_rotation))
-
-        return player_rotation
-
-    def get_collisions(self):
-        coll_foward = self.read_float(offset + coll_forward_address)
-        coll_up = self.read_float(offset + coll_up_address)
-        coll_down = self.read_float(offset + coll_down_addrss)
-        coll_left = self.read_float(offset + coll_left_address)
-        coll_right = self.read_float(offset + coll_right_address)
-
-        coll_class_forward = self.read_int(offset + coll_class_forward_address)
-        coll_class_up = self.read_int(offset + coll_class_up_address)
-        coll_class_down = self.read_int(offset + coll_class_down_address)
-        coll_class_left = self.read_int(offset + coll_class_left_address)
-        coll_class_right = self.read_int(offset + coll_class_right_address)
-
-        return (coll_foward, coll_up, coll_down, coll_left, coll_right,
-                coll_class_forward, coll_class_up, coll_class_down, coll_class_left, coll_class_right)
-
-    def get_collisions_normalized(self):
-        coll_forward = normalize_x(self.read_float(offset + coll_forward_address), -33, 256)
-        coll_up = normalize_x(self.read_float(offset + coll_up_address), -33, 256)
-        coll_down = normalize_x(self.read_float(offset + coll_down_addrss), -33, 256)
-        coll_left = normalize_x(self.read_float(offset + coll_left_address), -33, 256)
-        coll_right = normalize_x(self.read_float(offset + coll_right_address), -33, 256)
-
-        coll_class_forward = normalize_x(self.read_int(offset + coll_class_forward_address), 0, 16384)
-        coll_class_up = normalize_x(self.read_int(offset + coll_class_up_address), 0, 16384)
-        coll_class_down = normalize_x(self.read_int(offset + coll_class_down_address), 0, 16384)
-        coll_class_left = normalize_x(self.read_int(offset + coll_class_left_address), 0, 16384)
-        coll_class_right = normalize_x(self.read_int(offset + coll_class_right_address), 0, 16384)
-
-        return (coll_forward, coll_up, coll_down, coll_left, coll_right,
-                coll_class_forward, coll_class_up, coll_class_down, coll_class_left, coll_class_right)
-
-    def distance_between_positions_2d(self, position1, position2):
-        return ((position1.x - position2.x) ** 2 + (position1.y - position2.y) ** 2) ** 0.5
-
-    def frame_advance(self):
-        frame_count = self.get_current_frame_count()
-
-        while frame_count == self.last_frame_count:
-            if self.must_restart:
-                self.open_process()
-                self.must_restart = False
-
-                return False
-
-            frame_count = self.get_current_frame_count()
-
-        self.last_frame_count = frame_count
-
-        self.write_int(offset + frame_progress_address, frame_count)
-
-        return True
+            process_opened = self.game.open_process()
+            
+    def stop(self):
+        self.game.close_process()
 
     def reset(self):
-        # Check that planet is correct
-        while self.get_current_planet() != 5:
+        # Check that we've landed on the right level yet
+        while self.game.get_current_level() != 5:
             print("Waiting for Rilgar level change...")
-
-            if self.must_restart:
-                break
 
             time.sleep(1)
 
-        hoverboard_lady_ptr = self.read_int(offset + hoverboard_lady_ptr_address)
-        self.write_byte(offset + hoverboard_lady_ptr + 0x20, 3)
-        self.write_byte(offset + hoverboard_lady_ptr + 0xbc, 3)
-
-        self.set_player_state(0)
-
-        self.frame_advance()
-        self.set_nanotech(4)
+        # Reset variables that we use to keep track of the episode state and statistics
         self.stalled_timer = 0
-
-        self.last_position = None
         self.distance = 0.0
         self.distance_traveled = 0.0
         self.timer = 0
-        self.last_frame_count = 0
-        self.last_rotation = 0.0
         self.height_lost = 0.0
         self.checkpoint = 0
         self.jump_debounce = 0
-
-        # Get a random respawn point index
-        # respawn_index = np.random.randint(0, len(self.respawn_points_template))
-        # self.respawn_point = self.respawn_points_template[respawn_index]
-        #
-        # # Rotate respawn points from template
-        # self.respawn_points = self.respawn_points_template[respawn_index:] + self.respawn_points_template[:respawn_index]
-
-        # Create checkpoints from self.checkpoint_template and jitter them slightly to make them harder to memorize
-        self.checkpoints = []
-        for checkpoint in self.checkpoints_template:
-            self.checkpoints.append(Vector3(checkpoint.x + np.random.uniform(-1, 1),
-                                            checkpoint.y + np.random.uniform(-1, 1),
-                                            checkpoint.z))
-
-        self.frames_moving_away_from_skid = 0
-
-        self.currently_dead = False
-        self.death_counter = 0
+        self.frames_moving_away_from_checkpoint = 0
 
         self.reward_counters = {
             'rewards/timeout_penalty': 0,
@@ -413,50 +90,54 @@ class RatchetEnvironment:
             'rewards/reached_checkpoint_reward': 0
         }
 
-        self.distance_from_skid_per_step = []
-        self.skid_checkpoints = []
+        # Create checkpoints from self.checkpoint_template and jitter them slightly to make them harder to memorize
+        self.checkpoints = []
+        for checkpoint in self.checkpoints_template:
+            self.checkpoints.append(Vector3(checkpoint.x + np.random.uniform(-1, 1),
+                                            checkpoint.y + np.random.uniform(-1, 1),
+                                            checkpoint.z))
 
-        # Clear inputs
-        self.write_int(offset + input_address, 0)
+        # Reset game and player state to start a new episode
+        self.game.set_player_state(0)
 
-        # Set player position and rotation from respawn point
-        # self.write_float(offset + player_position_address, self.respawn_point[0])
-        # self.write_float(offset + player_position_address + 4, self.respawn_point[1])
-        # self.write_float(offset + player_position_address + 8, self.respawn_point[2])
-        # self.write_float(offset + 0x96A554, self.respawn_point[3])
+        self.game.start_hoverboard_race()
+
+        self.game.frame_advance()
+
+        # Set player back to full health, just in case
+        self.game.set_nanotech(4)
+
+        self.distance_from_checkpoint_per_step = []
+
+        # Clear game inputs so we don't keep moving from the last episode
+        self.game.set_controller_input(0)
 
         # Frame advance a couple of frames before giving control
-        for i in range(10):
-            self.frame_advance()
+        for _ in range(10):
+            self.game.frame_advance()
 
-
-        # Find Skid
-        # self.skid_address = self.read_int(offset + skid_ptr_address)
-
+        # Step once to get the first observation
         return self.step(0)
 
     def step(self, action):
         state, reward, terminal = None, 0.0, False
+
         self.timer += 1
 
-        if self.timer > 60 * 60 * 5:  # 5 minutes
+        if self.timer > 30 * 60 * 5:  # 5 minutes
             terminal = True
             self.reward_counters['rewards/timeout_penalty'] += 1
             reward -= 1.0
             print("Timeout!")
 
-        if self.skid_address == 0:
-            print("Skid address 0!")
-            self.skid_address = self.read_int(offset + skid_ptr_address)
-
         actions_mapping = [
             0x0,     # No action
-            0x8000,  # Left
-            0x2000,  # Right
             0x40,    # Jump
+            0x2000,  # Left
+            0x8000,  # Right
         ]
 
-        # Discourage excessive jumping
+        # Discourage excessive jumping because it's annoying
         if self.jump_debounce > 0:
             self.jump_debounce -= 1
 
@@ -466,49 +147,65 @@ class RatchetEnvironment:
                 reward -= self.jump_debounce * 0.00001
             self.jump_debounce += 5
 
-        self.write_int(offset + input_address, actions_mapping[action])
+        # Communicate game inputs with game
+        self.game.set_controller_input(actions_mapping[action])
 
-        next_checkpoint_position = self.checkpoints[self.checkpoint]
+        # Get current player position and distance to checkpoint before advancing to next frame so we can calculate
+        #   how much the agent has moved towards the goal given the input it provided.
+        pre_player_position = self.game.get_player_position()
 
-        # Check that player is moving towards skid
-        old_distance_from_checkpoint = self.distance_between_positions_2d(self.get_player_position(), next_checkpoint_position)
+        checkpoint_position = self.checkpoints[self.checkpoint]
 
-        old_check_delta_x, old_check_delta_y = (next_checkpoint_position.x - self.get_player_position().x,
-                                                next_checkpoint_position.y - self.get_player_position().y)
+        # Check that agent is moving towards the next checkpoint
+        pre_distance_from_checkpoint = pre_player_position.distance_to_2d(checkpoint_position)
 
-        # Advance frame
-        if not self.frame_advance() or not self.frame_advance():
+        pre_check_delta_x, pre_check_delta_y = (checkpoint_position.x - pre_player_position.x,
+                                                checkpoint_position.y - pre_player_position.y)
+
+        # Frame advance the game
+        if not self.game.frame_advance() or not self.game.frame_advance():
+            # If we can't frame advance, the game has probably crashed
             reward -= 1.0
             self.reward_counters['rewards/crash_penalty'] += 1
             terminal = True
 
-        check_delta_x, check_delta_y = (next_checkpoint_position.x - self.get_player_position().x,
-                                        next_checkpoint_position.y - self.get_player_position().y)
+        # Get updated player info
+        position = self.game.get_player_position()
+        player_rotation = self.game.get_player_rotation()
+        distance_from_ground = self.game.get_distance_from_ground()
+        speed = self.game.get_player_speed()
+        player_state = self.game.get_player_state()
 
-        check_delta_x, check_delta_y = old_check_delta_x - check_delta_x, old_check_delta_y - check_delta_y
+        # Calculate new distances, deltas and differences
+        check_delta_x, check_delta_y = (checkpoint_position.x - position.x,
+                                        checkpoint_position.y - position.y)
 
-        check_delta_x, check_delta_y = max(-1, min(1, check_delta_x)), max(-1, min(1, check_delta_y))
+        check_delta_x, check_delta_y = pre_check_delta_x - check_delta_x, pre_check_delta_y - check_delta_y
 
-        new_distance_from_checkpoint = self.distance_between_positions_2d(self.get_player_position(), next_checkpoint_position)
+        check_diff_x, check_diff_y = max(-1, min(1, check_delta_x)), max(-1, min(1, check_delta_y))
 
-        if self.frames_moving_away_from_skid < 0:
-            self.frames_moving_away_from_skid = 0
-        elif self.frames_moving_away_from_skid > 20:
-            self.frames_moving_away_from_skid = 20
+        distance_from_checkpoint = self.game.get_player_position().distance_to_2d(checkpoint_position)
 
-        if new_distance_from_checkpoint < old_distance_from_checkpoint:
-            if old_distance_from_checkpoint - new_distance_from_checkpoint < 2:
-                self.reward_counters['rewards/distance_from_checkpoint_reward'] += (old_distance_from_checkpoint - new_distance_from_checkpoint) * 0.075
-                reward += (old_distance_from_checkpoint - new_distance_from_checkpoint) * 0.075
-                self.frames_moving_away_from_skid -= 0
+        # We want to discourage the agent from moving away from the checkpoint, but we don't want to penalize it
+        #  too much for doing so because it's not always possible to move directly towards the checkpoint.
+        if self.frames_moving_away_from_checkpoint < 0:
+            self.frames_moving_away_from_checkpoint = 0
+        elif self.frames_moving_away_from_checkpoint > 20:
+            self.frames_moving_away_from_checkpoint = 20
+
+        if distance_from_checkpoint < pre_distance_from_checkpoint:
+            if pre_distance_from_checkpoint - distance_from_checkpoint < 2:
+                self.reward_counters['rewards/distance_from_checkpoint_reward'] += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.075
+                reward += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.075
+                self.frames_moving_away_from_checkpoint -= 0
         else:
-            self.frames_moving_away_from_skid += 1
+            self.frames_moving_away_from_checkpoint += 1
 
-            self.reward_counters['rewards/distance_from_checkpoint_penalty'] += 0.005 + (self.frames_moving_away_from_skid * 0.001)
-            reward -= 0.005 + (self.frames_moving_away_from_skid * 0.001)
+            self.reward_counters['rewards/distance_from_checkpoint_penalty'] += 0.005 + (self.frames_moving_away_from_checkpoint * 0.001)
+            reward -= 0.005 + (self.frames_moving_away_from_checkpoint * 0.001)
 
-        # If agent is within 20 units of checkpoint, go to next checkpoint or loop around
-        if new_distance_from_checkpoint < 15:
+        # If agent is within 15 units of checkpoint, go to next checkpoint or loop around
+        if distance_from_checkpoint < 15:
             self.checkpoint += 1
             if self.checkpoint >= len(self.checkpoints):
                 self.checkpoint = 0
@@ -516,18 +213,15 @@ class RatchetEnvironment:
             self.reward_counters['rewards/reached_checkpoint_reward'] += 0.8
             reward += 0.8
 
-            next_checkpoint_position = self.checkpoints[self.checkpoint]
-            new_distance_from_checkpoint = self.distance_between_positions_2d(self.get_player_position(),
-                                                                              next_checkpoint_position)
+            checkpoint_position = self.checkpoints[self.checkpoint]
+            distance_from_checkpoint = self.game.get_player_position().distance_to_2d(checkpoint_position)
 
-        position = self.get_player_position()
-        player_rotation = self.get_player_rotation()
-        distance_from_ground = self.get_distance_from_ground()
-        speed = self.get_player_speed()
+        # Various speed related rewards and penalties
 
+        # Check that the agent is moving and isn't stuck in place
         if speed < 0.1:
             self.stalled_timer += 1
-            if self.stalled_timer > 30 * 5:
+            if self.stalled_timer > 30 * 5:  # 5 in-game seconds
                 terminal = True
                 self.reward_counters['rewards/timeout_penalty'] += 1
                 reward -= 1.0
@@ -535,6 +229,7 @@ class RatchetEnvironment:
         else:
             self.stalled_timer = 0
 
+        # Encourage higher speed
         if speed > 0.25:
             self.reward_counters['rewards/speed_reward'] += (speed - 0.25) * 0.05
             reward += (speed - 0.25) * 0.05
@@ -544,77 +239,36 @@ class RatchetEnvironment:
             self.reward_counters['rewards/stall_penalty'] += 0.05
             reward -= 0.05
 
-        # Get distance player has moved since last frame to calculate reward
-        if self.last_position is not None:
-            distance = self.distance_between_positions_2d(position, self.last_position)
+        # We mostly collect position data to calculate distance traveled for metrics, and don't specifically use it for
+        #   rewards or penalties.
+        if pre_player_position is not None:
+            distance = position.distance_to_2d(pre_player_position)
             if distance > 1.0:
-                #print(f"Discarding unreasonable distance: {distance}")
+                # Discard large distances because it probably just means the player respawned or was otherwise
+                #   teleported by the game.
                 distance = 0.0
 
             self.distance_traveled += distance
 
             if distance > 0:
-                if self.last_position.z > position.z:
-                    self.height_lost += self.last_position.z - position.z
+                if pre_player_position.z > position.z:
+                    self.height_lost += pre_player_position.z - position.z
 
-                # if distance_from_ground > 0:
-                #     distance = 0.0
-                #     reward -= 0.1
-
-            # No reward if player has rotated
-            #if player_rotation.z == self.last_rotation:
-            #reward += distance * 2 #+ (self.timer * 0.01)
             if distance_from_ground < 20:
                 self.distance += distance
 
-        # if self.distance > 45:
-        #     self.reward_counters['rewards/distance_traveled_reward'] += 0.9
-        #     reward += 0.9
-        #     self.distance = 0
-
-        # Each 5 seconds the agent survives, give a reward
-        # if self.timer % 60 == 0:
-        #     reward += 0.1
-
-        # Discount distance from skid
-        # distance_from_skid = self.distance_between_positions_2d(position, skid_position)
-
-        # if self.timer / 60 > 5:
-        #     reward += (-distance_from_skid + 30) * 0.1
-
-        # # Reward agent if it is pointing towards skid
-        # angle = abs(player_rotation.z - np.arctan2(skid_position.y - position.y, skid_position.x - position.x))
-        # if angle < 0.5:
-        #     reward += 1.0
-
-        # reward -= distance_from_ground * 0.2
-
-        #print(f"Skid position: {skid_position.x}, {skid_position.y}, {skid_position.z}. Distance: {distance_from_skid}")
-
-        self.last_position = position
-        self.last_rotation = player_rotation.z
-
-        player_state = self.get_player_state()
-
-        if self.currently_dead and player_state == 107:
-            self.currently_dead = False
-
-        if not self.currently_dead and (
-                player_state == 109 or player_state == 110 or player_state == 111
-        ):
+        if player_state == 109 or player_state == 110 or player_state == 111:
             self.reward_counters['rewards/death_penalty'] += 1
             reward -= 1.0
-            self.currently_dead = True
-            self.death_counter += 1
+            terminal = True
 
-            if self.death_counter >= 1:
-                terminal = True
+        self.distance_from_checkpoint_per_step.append(distance_from_checkpoint)
 
-        self.distance_from_skid_per_step.append(new_distance_from_checkpoint)
-
-        coll_f, coll_u, coll_d, coll_l, coll_r, coll_cf, coll_cu, coll_cd, coll_cl, coll_cr = self.get_collisions()
+        coll_f, coll_u, coll_d, coll_l, coll_r, coll_cf, coll_cu, coll_cd, coll_cl, coll_cr = self.game.get_collisions()
 
         # Penalize various collisions
+
+        # Wall collision
         if coll_f != -32.0 and coll_u != -32.0 and coll_f < 10.5 and coll_u < 15.5 and coll_cf == 0:
             reward -= 0.1
             self.reward_counters['rewards/wall_crash_penalty'] += 0.1
@@ -627,28 +281,30 @@ class RatchetEnvironment:
             reward -= 0.2
             self.reward_counters['rewards/tnt_crash_penalty'] += 1
 
+        # Going over void, e.g. outside the course in many cases
         if distance_from_ground > 31 and coll_d <= -32.0:
             self.reward_counters['rewards/void_penalty'] += 0.2
             reward -= 0.2
 
+        # Build observation state
         state = [
-            normalize_x(position.x, 0, 500),  # 0
-            normalize_x(position.y, 0, 500),  # 1
-            normalize_x(position.z, -150, 150),   # 2
-            normalize_x(next_checkpoint_position.x, 0, 500),  # 7
-            normalize_x(next_checkpoint_position.y, 0, 500),  # 8
-            check_delta_x,
-            check_delta_y,
-            normalize_x(player_rotation.z, -20, 20), # 3
-            normalize_x(distance_from_ground, -64, 64),  # 4
-            normalize_x(speed, 0, 2),  # 5
-            #normalize_x(self.timer, 0, 60 * 60 * 60 * 24),  # 6 # 24 hours
-            normalize_x(new_distance_from_checkpoint, 0, 500),  # 9
-            normalize_x(player_state, 0, 255),  # 10
-            normalize_x(self.distance_traveled, 0, 100000),  # 11
-            *self.get_collisions_normalized()  # 12-21
+            np.interp(position.x, (0, 500), (-1, 1)),  # 0
+            np.interp(position.y, (0, 500), (-1, 1)),  # 1
+            np.interp(position.z, (-150, 150), (-1, 1)),  # 2
+            np.interp(checkpoint_position.x, (0, 500), (-1, 1)),  # 3
+            np.interp(checkpoint_position.y, (0, 500), (-1, 1)),  # 4
+            check_diff_x,  # 5
+            check_diff_y,  # 6
+            np.interp(player_rotation.z, (-20, 20), (-1, 1)),  # 7
+            np.interp(distance_from_ground, (-64, 64), (-1, 1)),  # 8
+            np.interp(speed, (0, 2), (-1, 1)),  # 9
+            np.interp(distance_from_checkpoint, (0, 500), (-1, 1)),  # 10
+            np.interp(player_state, (0, 255), (-1, 1)),  # 11
+            np.interp(self.distance_traveled, (0, 100000), (-1, 1)),  # 12
+            *self.game.get_collisions_normalized()  # 13-23
         ]
 
+        # Does the reward actually need to be normalized?
         if reward > 1 or reward < -1:
             # Print if wildly out of bounds
             if reward > 2 or reward < -2:
@@ -656,7 +312,6 @@ class RatchetEnvironment:
 
             # Clamp
             reward = max(-1, min(1, reward))
-
 
         # Iterate through the state to check that none of the values are above 1 or below -1
         for s, state_value in enumerate(state):
@@ -667,15 +322,10 @@ class RatchetEnvironment:
         return np.array(state, dtype=np.float32), reward, terminal
 
 
+# Just used for various tests of the environment
 if __name__ == '__main__':
     env = RatchetEnvironment()
-    env.open_process()
-
-    #env.reset()
-
-    # Get and print hoverboard lady address as hex
-    # hoverboard_lady_ptr = env.read_int(offset + hoverboard_lady_ptr_address)
-    # print(f"Hoverboard lady pointer: {hex(hoverboard_lady_ptr)}. With offset: {hex(hoverboard_lady_ptr + offset)}")
+    env.start()
 
     try:
         steps = 0
@@ -688,44 +338,15 @@ if __name__ == '__main__':
         while True:
             current_time = time.time()
 
-            # Busy-wait until it's time for the next frame
-            # while current_time < next_frame_time:
-            #     current_time = time.time()
-
             input()
 
-            # print(f"Collisions:", *env.get_collisions())
-
-            current_position = env.get_player_position()
-            print(f"[{current_position.x}, {current_position.y}, {current_position.z}, {env.get_player_rotation().z}],", end="")
-
-            # if last_checkpoint is None:
-            #     last_checkpoint = env.get_player_position()
+            current_position = env.game.get_player_position()
+            print(f"[{current_position.x}, {current_position.y}, {current_position.z}, {env.game.get_player_rotation().z}],", end="")
 
             # Schedule next frame
             next_frame_time += 1 / 60  # Schedule for the next 1/60th second
             time.sleep(0.016)
 
-            # current_position = env.get_player_position()
-            #
-            # if env.distance_between_positions_2d(current_position, last_checkpoint) > 40:
-            #     print(f"{current_position.x}, {current_position.y}, {current_position.z}")
-            #     last_checkpoint = current_position
-
-            # skid_pos = env.get_skid_position()
-            # print(f"Skid position: {skid_pos.x}, {skid_pos.y}, {skid_pos.z}")
-
-            #state__, reward__, terminal__ = env.step(0)
-            # state__, reward__, terminal__ = env.step(np.random.choice(4))
-
-            # print(f"Collisions:", *env.get_collisions())
-            #
-            # if terminal__:
-            #     env.reset()
-
-            # env.step(0x1040 if steps % 2 == 0 else 0x1000)
-
             steps += 1
-
     except KeyboardInterrupt:
-        env.close_process()
+        env.stop()
