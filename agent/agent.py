@@ -13,7 +13,7 @@ enable_wandb = "pydevd" not in sys.modules
 
 
 class DeepQNetwork(nn.Module):
-    def __init__(self, lr, feature_count, hidden_dims, n_actions, num_layers=3, lstm_units=256):
+    def __init__(self, lr, feature_count, hidden_dims, n_actions, num_layers=3, lstm_units=512):
         super(DeepQNetwork, self).__init__()
 
         self.hidden_dims = hidden_dims
@@ -22,10 +22,10 @@ class DeepQNetwork(nn.Module):
         self.hidden_dims_halved = int(hidden_dims/2)
         self.lstm_units = lstm_units
 
-        self.lstm = nn.LSTM(feature_count, lstm_units, num_layers, batch_first=True)
+        self.fc0 = nn.Linear(feature_count, self.hidden_dims)
+        # self.bn0 = nn.BatchNorm1d(self.hidden_dims)
 
-        self.fc0 = nn.Linear(lstm_units, self.hidden_dims)
-        self.bn0 = nn.BatchNorm1d(self.hidden_dims)
+        self.lstm = nn.LSTM(self.hidden_dims, lstm_units, num_layers, batch_first=True)
 
         self.fc1 = nn.Linear(self.hidden_dims, self.hidden_dims)
         self.bn1 = nn.BatchNorm1d(self.hidden_dims)
@@ -38,7 +38,8 @@ class DeepQNetwork(nn.Module):
         # Output layer
         self.fc4 = nn.Linear(self.hidden_dims, self.n_actions)
 
-        self.optimizer = optim.AdamW(self.parameters(), lr=lr, weight_decay=1e-4)
+        # self.optimizer = optim.AdamW(self.parameters(), lr=lr, weight_decay=1e-6)
+        self.optimizer = optim.RMSprop(self.parameters(), lr=lr)
 
         self.scheduler = T.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
@@ -46,10 +47,22 @@ class DeepQNetwork(nn.Module):
             factor=0.95,
             patience=300,
             threshold=0.5,
+            min_lr=1e-6,
             threshold_mode='abs'
         )
 
-        self.loss = nn.HuberLoss()
+        # self.scheduler = T.optim.lr_scheduler.CyclicLR(
+        #     self.optimizer,
+        #     base_lr=lr,
+        #     max_lr=lr*10,
+        #     step_size_up=7500,
+        #     step_size_down=20000,
+        #     cycle_momentum=False,
+        #     mode='exp_range',
+        #     gamma=1.0
+        # )
+
+        self.loss = nn.MSELoss()
         self.device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
         self.to(self.device)
 
@@ -58,13 +71,13 @@ class DeepQNetwork(nn.Module):
             hidden_state = T.zeros(self.num_layers, state.size(0), self.lstm_units).to(self.device)
             cell_state = T.zeros(self.num_layers, state.size(0), self.lstm_units).to(self.device)
 
+        x = F.leaky_relu(self.fc0(state), 0.01)
+        # x = self.bn0(x)
+
         # LSTM
-        out, (hidden_state, cell_state) = self.lstm(state, (hidden_state, cell_state))
+        out, (hidden_state, cell_state) = self.lstm(x, (hidden_state, cell_state))
 
-        x = F.leaky_relu(self.fc0(out[:, -1, :]), 0.01)
-        x = self.bn0(x)
-
-        x = F.leaky_relu(self.fc1(x), 0.01)
+        x = F.leaky_relu(self.fc1(out[:, -1, :]), 0.01)
         x = self.bn1(x)
 
         x = F.leaky_relu(self.fc2(x), 0.01)
@@ -84,7 +97,7 @@ class DeepQNetwork(nn.Module):
 
 class Agent:
     def __init__(self, gamma, epsilon, lr, input_dims, batch_size, n_actions,
-                 max_mem_size=500000, eps_end=0.001, eps_dec=6e-4, sequence_length=5):
+                 max_mem_size=500000, eps_end=0.005, eps_dec=9e-5, sequence_length=5):
         self.gamma = gamma
         self.epsilon = epsilon
         self.eps_min = eps_end
@@ -98,8 +111,8 @@ class Agent:
         self.action_space = [i for i in range(n_actions)]
         self.mem_cntr = 0
 
-        self.Q_eval = DeepQNetwork(lr=lr, feature_count=input_dims, hidden_dims=256, n_actions=n_actions)
-        self.Q_target = DeepQNetwork(lr=lr, feature_count=input_dims, hidden_dims=256, n_actions=n_actions)
+        self.Q_eval = DeepQNetwork(lr=lr, feature_count=input_dims, hidden_dims=512, n_actions=n_actions)
+        self.Q_target = DeepQNetwork(lr=lr, feature_count=input_dims, hidden_dims=512, n_actions=n_actions)
         self.Q_target.freeze()
         self.update_target_network()
 
@@ -300,8 +313,8 @@ class Agent:
 
         if terminal_learn:
             # Don't update the scheduler if we're not learning
-            if self.epsilon <= self.eps_min:
-                self.Q_eval.scheduler.step(average_reward)
+            #if self.epsilon <= self.eps_min:
+            self.Q_eval.scheduler.step(average_reward)
 
             if enable_wandb:
                 for name, param in self.Q_eval.named_parameters():

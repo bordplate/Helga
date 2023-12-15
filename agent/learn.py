@@ -29,7 +29,7 @@ def start_training():
 
     sequence_length = 30  # Number of observations to use as input to the network
 
-    learning_rate = 0.0001
+    learning_rate = 5e-4
     features = 23
     batch_size = 64
     train_frequency = 4
@@ -49,7 +49,7 @@ def start_training():
 
         update_graph_html(wandb.run.get_url())
 
-    agent = Agent(gamma=0.99, epsilon=1.0, batch_size=batch_size, n_actions=4, eps_end=0.001,
+    agent = Agent(gamma=0.99, epsilon=1.0, batch_size=batch_size, n_actions=4, eps_end=0.005,
                   input_dims=features, lr=learning_rate, sequence_length=sequence_length)
 
     # Load existing model if load_model is set
@@ -117,23 +117,21 @@ def start_training():
                 loss = agent.learn()
                 losses.append(loss)
 
-        loss = agent.learn(num_batches=1, terminal_learn=True, average_reward=accumulated_reward)
+        scores.append(accumulated_reward)
+        eps_history.append(agent.epsilon)
+
+        avg_score = np.mean(scores[-100:])
+
+        loss = agent.learn(num_batches=1, terminal_learn=True, average_reward=avg_score)
         losses.append(loss)
 
         if steps_since_update > target_update_frequency:
             agent.update_target_network()
             steps_since_update = 0
 
-        avg_score = np.mean(scores[-100:])
-
-        agent.learn(terminal_learn=True, average_reward=avg_score)
-
         if env.distance_traveled > furthest_distance:
             furthest_distance = env.distance_traveled
             print(f"New furthest distance: {furthest_distance}")
-
-        scores.append(accumulated_reward)
-        eps_history.append(agent.epsilon)
 
         # Save the model every 200 episodes
         if i % 200 == 0 and i != 0:

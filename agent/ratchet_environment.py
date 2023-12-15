@@ -14,6 +14,7 @@ class RatchetEnvironment:
             Vector3(168.9180450439453, 234.16783142089844, 75.97647857666016),
             Vector3(121.3829345703125, 262.2883605957031, 76.0),
             Vector3(73.7027587890625, 293.1028747558594, 68.0),
+            Vector3(71.1695, 340.3349, 68.0),
             Vector3(81.04218292236328, 370.8876953125, 68.0),
             Vector3(100.66133117675781, 422.2431640625, 68.0),
             Vector3(129.94361877441406, 464.2681579589844, 68.0),
@@ -34,6 +35,7 @@ class RatchetEnvironment:
         self.height_lost = 0.0
 
         self.checkpoint = 0
+        self.n_checkpoints = 0
 
         self.distance_from_checkpoint_per_step = []
 
@@ -70,6 +72,7 @@ class RatchetEnvironment:
         self.timer = 0
         self.height_lost = 0.0
         self.checkpoint = 0
+        self.n_checkpoints = 0
         self.jump_debounce = 0
         self.frames_moving_away_from_checkpoint = 0
 
@@ -195,8 +198,8 @@ class RatchetEnvironment:
 
         if distance_from_checkpoint < pre_distance_from_checkpoint:
             if pre_distance_from_checkpoint - distance_from_checkpoint < 2:
-                self.reward_counters['rewards/distance_from_checkpoint_reward'] += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.075
-                reward += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.075
+                self.reward_counters['rewards/distance_from_checkpoint_reward'] += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.005
+                reward += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.005
                 self.frames_moving_away_from_checkpoint -= 0
         else:
             self.frames_moving_away_from_checkpoint += 1
@@ -207,11 +210,12 @@ class RatchetEnvironment:
         # If agent is within 15 units of checkpoint, go to next checkpoint or loop around
         if distance_from_checkpoint < 15:
             self.checkpoint += 1
+            self.n_checkpoints += 1
             if self.checkpoint >= len(self.checkpoints):
                 self.checkpoint = 0
 
-            self.reward_counters['rewards/reached_checkpoint_reward'] += 0.8
-            reward += 0.8
+            self.reward_counters['rewards/reached_checkpoint_reward'] += 0.75 * self.n_checkpoints
+            reward += 0.75 * self.n_checkpoints
 
             checkpoint_position = self.checkpoints[self.checkpoint]
             distance_from_checkpoint = self.game.get_player_position().distance_to_2d(checkpoint_position)
@@ -258,8 +262,8 @@ class RatchetEnvironment:
                 self.distance += distance
 
         if player_state == 109 or player_state == 110 or player_state == 111:
-            self.reward_counters['rewards/death_penalty'] += 1
-            reward -= 1.0
+            # self.reward_counters['rewards/death_penalty'] += 1
+            # reward -= 1.0
             terminal = True
 
         self.distance_from_checkpoint_per_step.append(distance_from_checkpoint)
@@ -279,7 +283,7 @@ class RatchetEnvironment:
                 (coll_d != -32.0 and coll_d < 5.5 and coll_cd == 505)
         ):
             reward -= 0.2
-            self.reward_counters['rewards/tnt_crash_penalty'] += 1
+            self.reward_counters['rewards/tnt_crash_penalty'] += 0.2
 
         # Going over void, e.g. outside the course in many cases
         if distance_from_ground > 31 and coll_d <= -32.0:
@@ -305,13 +309,11 @@ class RatchetEnvironment:
         ]
 
         # Does the reward actually need to be normalized?
-        if reward > 1 or reward < -1:
-            # Print if wildly out of bounds
-            if reward > 2 or reward < -2:
-                print(f"Danger! Reward out of bounds: {reward}")
+        if reward > 20 or reward < -20:
+            print(f"Danger! Reward out of bounds: {reward}")
 
             # Clamp
-            reward = max(-1, min(1, reward))
+            reward = max(-20, min(20, reward))
 
         # Iterate through the state to check that none of the values are above 1 or below -1
         for s, state_value in enumerate(state):
