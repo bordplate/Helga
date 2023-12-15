@@ -22,8 +22,18 @@ class DeepQNetwork(nn.Module):
         self.hidden_dims_halved = int(hidden_dims/2)
         self.lstm_units = lstm_units
 
-        self.fc0 = nn.Linear(feature_count, self.hidden_dims)
+        self.fc0 = nn.Linear(feature_count-10, self.hidden_dims_halved)
         # self.bn0 = nn.BatchNorm1d(self.hidden_dims)
+
+        self.raycast_cnn = nn.Sequential(
+            nn.Conv1d(in_channels=2, out_channels=16, kernel_size=2, stride=1),
+            nn.LeakyReLU(),
+            nn.Conv1d(in_channels=16, out_channels=32, kernel_size=2, stride=1),
+            nn.LeakyReLU(),
+            nn.BatchNorm1d(32),
+            nn.Flatten(),
+            nn.Linear(32 * 3, self.hidden_dims_halved)  # Adjust the input features of nn.Linear
+        )
 
         self.lstm = nn.LSTM(self.hidden_dims, lstm_units, num_layers, batch_first=True)
 
@@ -71,8 +81,29 @@ class DeepQNetwork(nn.Module):
             hidden_state = T.zeros(self.num_layers, state.size(0), self.lstm_units).to(self.device)
             cell_state = T.zeros(self.num_layers, state.size(0), self.lstm_units).to(self.device)
 
-        x = F.leaky_relu(self.fc0(state), 0.01)
+        x = F.leaky_relu(self.fc0(state[:, :, :13]), 0.01)
         # x = self.bn0(x)
+
+        # Parts of the state gets pre-processed by a CNN
+
+        # Raycast states are the last 10 features of each observation
+        batch_size, num_observations, feature_size = state.shape
+
+        # Separate the raycasting data
+        raycasting_data = state[:, :, -10:]  # Last 10 features are raycasting data
+
+        # Reshape for batch processing:
+        # New shape: [batch_size * num_observations, 2, 5]
+        raycasting_data = raycasting_data.reshape(-1, 2, 5)
+
+        # Process all raycasting data through the CNN in one go
+        cnn_out = self.raycast_cnn(raycasting_data)
+
+        # Reshape the CNN output back to [batch_size, num_observations, new_feature_size]
+        cnn_out = cnn_out.reshape(batch_size, num_observations, -1)
+
+        # Concatenate the CNN output with the non-raycasting part of state
+        x = T.cat((x, cnn_out), dim=2)
 
         # LSTM
         out, (hidden_state, cell_state) = self.lstm(x, (hidden_state, cell_state))
