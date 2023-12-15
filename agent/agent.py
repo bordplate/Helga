@@ -97,7 +97,7 @@ class DeepQNetwork(nn.Module):
         raycasting_data = raycasting_data.reshape(-1, 2, 5)
 
         # Process all raycasting data through the CNN in one go
-        cnn_out = self.raycast_cnn(raycasting_data)
+        cnn_out = F.leaky_relu(self.raycast_cnn(raycasting_data), 0.01)
 
         # Reshape the CNN output back to [batch_size, num_observations, new_feature_size]
         cnn_out = cnn_out.reshape(batch_size, num_observations, -1)
