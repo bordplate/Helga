@@ -202,7 +202,7 @@ class Agent:
         elif index % self.learn_length <= self.keyframe_size[keyframe_index]:
             # Make sure we don't cross episode boundaries
             if done:
-                self.keyframe_size[keyframe_index] = index - keyframe_index
+                self.keyframe_size[keyframe_index] = index - keyframe_index + 1
 
             self.hidden_state_memory[index] = self.hidden_state.detach().clone().to(self.Q_eval.device)
             self.cell_state_memory[index] = self.cell_state.detach().clone().to(self.Q_eval.device)

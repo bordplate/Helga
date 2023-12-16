@@ -214,8 +214,8 @@ class RatchetEnvironment:
             if self.checkpoint >= len(self.checkpoints):
                 self.checkpoint = 0
 
-            self.reward_counters['rewards/reached_checkpoint_reward'] += 0.75 * self.n_checkpoints
-            reward += 0.75 * self.n_checkpoints
+            self.reward_counters['rewards/reached_checkpoint_reward'] += 1.5 * self.n_checkpoints
+            reward += 1.5 * self.n_checkpoints
 
             checkpoint_position = self.checkpoints[self.checkpoint]
             distance_from_checkpoint = self.game.get_player_position().distance_to_2d(checkpoint_position)
