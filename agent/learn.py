@@ -29,7 +29,7 @@ def start_training():
 
     sequence_length = 30  # Number of observations to use as input to the network
 
-    learning_rate = 5e-4
+    learning_rate = 3.5e-4
     features = 23
     batch_size = 64
     train_frequency = 4

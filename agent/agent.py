@@ -13,7 +13,7 @@ enable_wandb = "pydevd" not in sys.modules
 
 
 class DeepQNetwork(nn.Module):
-    def __init__(self, lr, feature_count, hidden_dims, n_actions, num_layers=3, lstm_units=512):
+    def __init__(self, lr, feature_count, hidden_dims, n_actions, num_layers=3, lstm_units=256):
         super(DeepQNetwork, self).__init__()
 
         self.hidden_dims = hidden_dims
@@ -46,7 +46,8 @@ class DeepQNetwork(nn.Module):
         self.bn3 = nn.BatchNorm1d(self.hidden_dims)
 
         # Output layer
-        self.fc4 = nn.Linear(self.hidden_dims, self.n_actions)
+        self.value_stream = nn.Linear(self.hidden_dims, 1)
+        self.advantage_stream = nn.Linear(self.hidden_dims, self.n_actions)
 
         # self.optimizer = optim.AdamW(self.parameters(), lr=lr, weight_decay=1e-6)
         self.optimizer = optim.RMSprop(self.parameters(), lr=lr)
@@ -117,7 +118,10 @@ class DeepQNetwork(nn.Module):
         x = F.leaky_relu(self.fc3(x), 0.01)
         x = self.bn3(x)
 
-        actions = self.fc4(x)
+        value = self.value_stream(x)
+        advantages = self.advantage_stream(x)
+
+        actions = value + (advantages - advantages.mean(dim=1, keepdim=True))
 
         return actions, (hidden_state, cell_state)
 
@@ -142,8 +146,8 @@ class Agent:
         self.action_space = [i for i in range(n_actions)]
         self.mem_cntr = 0
 
-        self.Q_eval = DeepQNetwork(lr=lr, feature_count=input_dims, hidden_dims=512, n_actions=n_actions)
-        self.Q_target = DeepQNetwork(lr=lr, feature_count=input_dims, hidden_dims=512, n_actions=n_actions)
+        self.Q_eval = DeepQNetwork(lr=lr, feature_count=input_dims, hidden_dims=256, n_actions=n_actions)
+        self.Q_target = DeepQNetwork(lr=lr, feature_count=input_dims, hidden_dims=256, n_actions=n_actions)
         self.Q_target.freeze()
         self.update_target_network()
 

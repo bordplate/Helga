@@ -262,8 +262,8 @@ class RatchetEnvironment:
                 self.distance += distance
 
         if player_state == 109 or player_state == 110 or player_state == 111:
-            # self.reward_counters['rewards/death_penalty'] += 1
-            # reward -= 1.0
+            self.reward_counters['rewards/death_penalty'] += 1.0
+            reward -= 1.0
             terminal = True
 
         self.distance_from_checkpoint_per_step.append(distance_from_checkpoint)
