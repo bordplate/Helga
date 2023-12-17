@@ -90,7 +90,9 @@ class RatchetEnvironment:
             'rewards/tnt_crash_penalty': 0,
             'rewards/void_penalty': 0,
             'rewards/stall_penalty': 0,
-            'rewards/reached_checkpoint_reward': 0
+            'rewards/reached_checkpoint_reward': 0,
+            'rewards/facing_checkpoint_reward': 0,
+            'rewards/rotating_to_face_checkpoint_reward': 0,
         }
 
         # Create checkpoints from self.checkpoint_template and jitter them slightly to make them harder to memorize
@@ -156,6 +158,7 @@ class RatchetEnvironment:
         # Get current player position and distance to checkpoint before advancing to next frame so we can calculate
         #   how much the agent has moved towards the goal given the input it provided.
         pre_player_position = self.game.get_player_position()
+        pre_player_rotation = self.game.get_player_rotation()
 
         checkpoint_position = self.checkpoints[self.checkpoint]
 
@@ -164,6 +167,8 @@ class RatchetEnvironment:
 
         pre_check_delta_x, pre_check_delta_y = (checkpoint_position.x - pre_player_position.x,
                                                 checkpoint_position.y - pre_player_position.y)
+
+        pre_angle = np.arctan2(checkpoint_position.y - pre_player_position.y, checkpoint_position.x - pre_player_position.x) - pre_player_rotation.z
 
         # Frame advance the game
         if not self.game.frame_advance() or not self.game.frame_advance():
@@ -242,6 +247,18 @@ class RatchetEnvironment:
         if speed < 0.22 and self.timer > 30:
             self.reward_counters['rewards/stall_penalty'] += 0.05
             reward -= 0.05
+
+        # Check that agent is facing a checkpoint by calculating angle between player and checkpoint
+        angle = np.arctan2(checkpoint_position.y - position.y, checkpoint_position.x - position.x) - player_rotation.z
+
+        # Give reward for facing the checkpoint
+        if abs(angle) < 0.1:
+            self.reward_counters['rewards/facing_checkpoint_reward'] += 0.02
+            reward += 0.02
+        elif abs(angle) < abs(pre_angle):
+            # Give reward for moving to face the checkpoint
+            self.reward_counters['rewards/rotating_to_face_checkpoint_reward'] += 0.01
+            reward += 0.01
 
         # We mostly collect position data to calculate distance traveled for metrics, and don't specifically use it for
         #   rewards or penalties.

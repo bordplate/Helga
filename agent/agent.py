@@ -316,11 +316,6 @@ class Agent:
         loss = self.Q_eval.loss(q_target, q_eval)
         loss.backward()
 
-        if terminal_learn and enable_wandb:
-            for name, param in self.Q_eval.named_parameters():
-                if param.grad is not None:
-                    wandb.log({f"grad/{name}": wandb.Histogram(param.grad.cpu().numpy())}, commit=False)
-
         T.nn.utils.clip_grad_norm_(self.Q_eval.parameters(), max_norm=0.5)
 
         self.Q_eval.optimizer.step()
@@ -331,11 +326,5 @@ class Agent:
 
         if terminal_learn:
             self.Q_eval.scheduler.step(average_reward)
-
-            if enable_wandb:
-                for name, param in self.Q_eval.named_parameters():
-                    if name in old_state_dict:
-                        diff = (param - old_state_dict[name]).abs().max()
-                        wandb.log({f"weight_change/{name}": diff}, commit=False)
 
         return loss.item()
