@@ -4,6 +4,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 
+from collections import namedtuple
+
 import wandb
 
 import sys
@@ -130,6 +132,12 @@ class DeepQNetwork(nn.Module):
             param.requires_grad = False
 
 
+Transition = namedtuple('Transition', (
+'state', 'action', 'reward', 'next_state', 'done', 'hidden_state', 'cell_state', 'next_hidden_state',
+'next_cell_state'))
+
+
+
 class PrioritizedReplayBuffer:
     def __init__(self, capacity, alpha=0.6):
         self.capacity = capacity
@@ -140,8 +148,25 @@ class PrioritizedReplayBuffer:
 
         self.device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
 
-    def add(self, state, action, reward, next_state, done, hidden_state, cell_state, next_hidden_state, next_cell_state):
+    def add(self, state, action, reward, next_state, done, next_hidden_state, next_cell_state):
         max_priority = max(self.priorities, default=1.0)
+
+        state = T.tensor(state, dtype=T.float32).to(self.device)
+        action = T.tensor(action, dtype=T.int64).to(self.device)
+        reward = T.tensor(reward, dtype=T.float32).to(self.device)
+        next_state = T.tensor(next_state, dtype=T.float32).to(self.device)
+        done = T.tensor(done, dtype=T.bool).to(self.device)
+
+        next_hidden_state = next_hidden_state.detach().clone().to(self.device)
+        next_cell_state = next_cell_state.detach().clone().to(self.device)
+
+        # Link "current" hidden state to previous transitions' next_hidden_state
+        if len(self.buffer) > 0:
+            hidden_state = self.buffer[self.position-1][7]
+            cell_state = self.buffer[self.position-1][8]
+        else:
+            hidden_state = next_hidden_state.detach().clone().to(self.device)
+            cell_state = next_cell_state.detach().clone().to(self.device)
 
         if len(self.buffer) < self.capacity:
             self.buffer.append((state, action, reward, next_state, done, hidden_state, cell_state, next_hidden_state, next_cell_state))
@@ -153,7 +178,7 @@ class PrioritizedReplayBuffer:
         self.position = (self.position + 1) % self.capacity
 
     def sample(self, batch_size, beta=0.4):
-        if len(self.buffer) == 0:
+        if not self.buffer:
             return [], [], [], [], []
 
         priorities = np.array(self.priorities) ** self.alpha
@@ -166,20 +191,10 @@ class PrioritizedReplayBuffer:
         weights /= weights.max()
         weights = np.array(weights, dtype=np.float32)
 
-        states, actions, rewards, next_states, dones, hidden_states, cell_states, next_hidden_states, next_cell_states = zip(*samples)
-        return (
-            T.tensor(np.array(states), dtype=T.float).to(self.device),
-            T.tensor(np.array(actions), dtype=T.int64).to(self.device),
-            T.tensor(np.array(rewards), dtype=T.float).to(self.device),
-            T.tensor(np.array(next_states), dtype=T.float).to(self.device),
-            T.tensor(np.array(dones), dtype=T.bool).to(self.device),
-            indices,
-            weights,
-            T.stack(hidden_states).squeeze(2).permute(1, 0, 2).contiguous(),
-            T.stack(cell_states).squeeze(2).permute(1, 0, 2).contiguous(),
-            T.stack(next_hidden_states).squeeze(2).permute(1, 0, 2).contiguous(),
-            T.stack(next_cell_states).squeeze(2).permute(1, 0, 2).contiguous(),
-        )
+        batch = Transition(*zip(*samples))
+        states, actions, rewards, next_states, dones = map(lambda x: T.stack(x).to(self.device), batch[:-4])
+
+        return states, actions, rewards, next_states, dones, indices, weights, *map(lambda x: T.stack(x).squeeze(2).permute(1, 0, 2).contiguous(), batch[-4:])
 
     def update_priorities(self, indices, new_priorities):
         for idx, priority in zip(indices, new_priorities):
@@ -221,9 +236,6 @@ class Agent:
         self.hidden_state = None
         self.cell_state = None
 
-        self.last_hidden_state = None
-        self.last_cell_state = None
-
         self.replay_buffer = PrioritizedReplayBuffer(self.mem_size)
 
     def start_new_episode(self):
@@ -238,19 +250,14 @@ class Agent:
         self.hidden_state = T.zeros(self.Q_eval.num_layers, 1, self.Q_eval.lstm_units).to(self.Q_eval.device)
         self.cell_state = T.zeros(self.Q_eval.num_layers, 1, self.Q_eval.lstm_units).to(self.Q_eval.device)
 
-        self.last_hidden_state = self.hidden_state.detach().clone().to(self.Q_eval.device)
-        self.last_cell_state = self.cell_state.detach().clone().to(self.Q_eval.device)
-
     def update_target_network(self):
         self.Q_target.load_state_dict(self.Q_eval.state_dict())
 
     def store_transition(self, state_sequence, action, reward, next_state_sequence, done):
         # FIXME: Storing the hidden and cell states for each state is wasteful.
         self.replay_buffer.add(state_sequence, action, reward, next_state_sequence, done,
-                               self.last_hidden_state.detach().clone().to(self.Q_eval.device),
-                               self.last_cell_state.detach().clone().to(self.Q_eval.device),
-                               self.hidden_state.detach().clone().to(self.Q_eval.device),
-                               self.cell_state.detach().clone().to(self.Q_eval.device)
+                               self.hidden_state,
+                               self.cell_state
                                )
 
     def choose_action(self, observation_sequence):
@@ -323,8 +330,6 @@ class Agent:
                 else self.eps_min
 
         if terminal_learn:
-            # Don't update the scheduler if we're not learning
-            #if self.epsilon <= self.eps_min:
             self.Q_eval.scheduler.step(average_reward)
 
             if enable_wandb:
