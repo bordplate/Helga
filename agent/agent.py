@@ -304,7 +304,7 @@ class Agent:
 
         td_error = abs(q_target - q_eval).detach().cpu().numpy()
 
-        self.replay_buffer.update_priorities(indices, td_error)
+        self.replay_buffer.update_priorities(indices, td_error + 1e-5)
 
         loss = self.Q_eval.loss(q_target, q_eval)
         loss.backward()
