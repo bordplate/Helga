@@ -130,6 +130,62 @@ class DeepQNetwork(nn.Module):
             param.requires_grad = False
 
 
+class PrioritizedReplayBuffer:
+    def __init__(self, capacity, alpha=0.6):
+        self.capacity = capacity
+        self.alpha = alpha
+        self.buffer = []
+        self.priorities = []
+        self.position = 0
+
+        self.device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
+
+    def add(self, state, action, reward, next_state, done, hidden_state, cell_state, next_hidden_state, next_cell_state):
+        max_priority = max(self.priorities, default=1.0)
+
+        if len(self.buffer) < self.capacity:
+            self.buffer.append((state, action, reward, next_state, done, hidden_state, cell_state, next_hidden_state, next_cell_state))
+            self.priorities.append(max_priority)
+        else:
+            self.buffer[self.position] = (state, action, reward, next_state, done, hidden_state, cell_state, next_hidden_state, next_cell_state)
+            self.priorities[self.position] = max_priority
+
+        self.position = (self.position + 1) % self.capacity
+
+    def sample(self, batch_size, beta=0.4):
+        if len(self.buffer) == 0:
+            return [], [], [], [], []
+
+        priorities = np.array(self.priorities) ** self.alpha
+        probabilities = priorities / priorities.sum()
+        indices = np.random.choice(len(self.buffer), batch_size, replace=True, p=probabilities)
+        samples = [self.buffer[idx] for idx in indices]
+
+        total = len(self.buffer)
+        weights = (total * probabilities[indices]) ** (-beta)
+        weights /= weights.max()
+        weights = np.array(weights, dtype=np.float32)
+
+        states, actions, rewards, next_states, dones, hidden_states, cell_states, next_hidden_states, next_cell_states = zip(*samples)
+        return (
+            T.tensor(np.array(states), dtype=T.float).to(self.device),
+            T.tensor(np.array(actions), dtype=T.int64).to(self.device),
+            T.tensor(np.array(rewards), dtype=T.float).to(self.device),
+            T.tensor(np.array(next_states), dtype=T.float).to(self.device),
+            T.tensor(np.array(dones), dtype=T.bool).to(self.device),
+            indices,
+            weights,
+            T.stack(hidden_states).squeeze(2).permute(1, 0, 2).contiguous(),
+            T.stack(cell_states).squeeze(2).permute(1, 0, 2).contiguous(),
+            T.stack(next_hidden_states).squeeze(2).permute(1, 0, 2).contiguous(),
+            T.stack(next_cell_states).squeeze(2).permute(1, 0, 2).contiguous(),
+        )
+
+    def update_priorities(self, indices, new_priorities):
+        for idx, priority in zip(indices, new_priorities):
+            self.priorities[idx] = priority
+
+
 class Agent:
     def __init__(self, gamma, epsilon, lr, input_dims, batch_size, n_actions,
                  max_mem_size=500000, eps_end=0.005, eps_dec=9e-5, sequence_length=5):
@@ -165,8 +221,10 @@ class Agent:
         self.hidden_state = None
         self.cell_state = None
 
-        self.hidden_state_learn = None
-        self.cell_state_learn = None
+        self.last_hidden_state = None
+        self.last_cell_state = None
+
+        self.replay_buffer = PrioritizedReplayBuffer(self.mem_size)
 
     def start_new_episode(self):
         if self.hidden_state is not None:
@@ -180,38 +238,20 @@ class Agent:
         self.hidden_state = T.zeros(self.Q_eval.num_layers, 1, self.Q_eval.lstm_units).to(self.Q_eval.device)
         self.cell_state = T.zeros(self.Q_eval.num_layers, 1, self.Q_eval.lstm_units).to(self.Q_eval.device)
 
+        self.last_hidden_state = self.hidden_state.detach().clone().to(self.Q_eval.device)
+        self.last_cell_state = self.cell_state.detach().clone().to(self.Q_eval.device)
+
     def update_target_network(self):
         self.Q_target.load_state_dict(self.Q_eval.state_dict())
 
     def store_transition(self, state_sequence, action, reward, next_state_sequence, done):
-        index = self.mem_cntr % self.mem_size
-        self.state_memory[index] = state_sequence
-        self.new_state_memory[index] = next_state_sequence
-        self.reward_memory[index] = reward
-        self.action_memory[index] = action
-        self.terminal_memory[index] = done
-
-        # To save memory, we only store the hidden and cell states when we hit "keyframes". When we hit keyframes,
-        #   we choose a random length for the keyframe, and store the hidden and cell states for that many steps.
-
-        keyframe_index = index - (index % self.learn_length)
-
-        # Store LSTM hidden and cell states every keyframe
-        if self.mem_cntr % self.learn_length == 0 and self.hidden_state is not None and self.cell_state is not None:
-            num_states = np.random.randint(5, self.learn_length-1)
-            self.keyframe_size[index] = num_states
-
-            self.hidden_state_memory[index] = self.hidden_state.detach().clone().to(self.Q_eval.device)
-            self.cell_state_memory[index] = self.cell_state.detach().clone().to(self.Q_eval.device)
-        elif index % self.learn_length <= self.keyframe_size[keyframe_index]:
-            # Make sure we don't cross episode boundaries
-            if done:
-                self.keyframe_size[keyframe_index] = index - keyframe_index + 1
-
-            self.hidden_state_memory[index] = self.hidden_state.detach().clone().to(self.Q_eval.device)
-            self.cell_state_memory[index] = self.cell_state.detach().clone().to(self.Q_eval.device)
-
-        self.mem_cntr += 1
+        # FIXME: Storing the hidden and cell states for each state is wasteful.
+        self.replay_buffer.add(state_sequence, action, reward, next_state_sequence, done,
+                               self.last_hidden_state.detach().clone().to(self.Q_eval.device),
+                               self.last_cell_state.detach().clone().to(self.Q_eval.device),
+                               self.hidden_state.detach().clone().to(self.Q_eval.device),
+                               self.cell_state.detach().clone().to(self.Q_eval.device)
+                               )
 
     def choose_action(self, observation_sequence):
         if np.random.random() > self.epsilon:
@@ -236,7 +276,7 @@ class Agent:
     def learn(self, num_batches=1, terminal_learn=False, average_reward=0.0):
         batch_size = self.batch_size * num_batches
 
-        if self.mem_cntr < batch_size or self.mem_cntr < 400:
+        if len(self.replay_buffer.buffer) < batch_size:
             return 0
 
         if terminal_learn:
@@ -245,91 +285,27 @@ class Agent:
         self.Q_eval.train()
         self.Q_eval.optimizer.zero_grad()
 
-        # Because we want to use stored hidden and cell states for the LSTM, the following is (needlessly) complicated.
-        # We start storing sequences of hidden and cell states of various lengths when we hit "keyframes". So instead of
-        #   sampling random batches of states, we sample random batches of keyframes.
-
-        max_mem = int(min(self.mem_cntr, self.mem_size) / self.learn_length)
-
-        if max_mem <= int(batch_size) + 1:
-            return 0
-
-        batch = np.random.choice(max_mem, int(batch_size), replace=False)
-        processed_states = 0
-
-        # Accumulators for data and states
-        state_batches, new_state_batches = [], []
-        action_batches, reward_batches, terminal_batches = [], [], []
-        hidden_states, cell_states = [], []
-        hidden_states_next, cell_states_next = [], []
-
-        for batch_index in batch:
-            if processed_states > batch_size:
-                break
-
-            processed_states += 1
-
-            keyframe_index = batch_index * self.learn_length
-            num_states = self.keyframe_size[keyframe_index]
-
-            if keyframe_index + num_states > self.mem_cntr or keyframe_index + num_states > self.mem_size or num_states < 3:
-                continue
-
-            sequential_batch = np.arange(keyframe_index + 1, keyframe_index + num_states)
-            processed_states += num_states
-
-            # Accumulate data
-            state_batches.append(T.tensor(self.state_memory[sequential_batch]).to(self.Q_eval.device))
-            new_state_batches.append(T.tensor(self.new_state_memory[sequential_batch]).to(self.Q_eval.device))
-            action_batches.append(T.tensor(self.action_memory[sequential_batch], dtype=T.long).to(self.Q_eval.device))
-            reward_batches.append(T.tensor(self.reward_memory[sequential_batch]).to(self.Q_eval.device))
-            terminal_batches.append(T.tensor(self.terminal_memory[sequential_batch]).to(self.Q_eval.device))
-
-            # Get the hidden and cell states for the observation preceding the current states
-            hidden_states.append(T.cat([self.hidden_state_memory[idx - 1] if self.hidden_state_memory[
-                                                                                 idx - 1] is not None else T.zeros(
-                self.Q_eval.num_layers, 1, self.Q_eval.lstm_units).to(self.Q_eval.device) for idx in sequential_batch], dim=1))
-            cell_states.append(T.cat([self.cell_state_memory[idx - 1] if self.cell_state_memory[
-                                                                             idx - 1] is not None else T.zeros(
-                self.Q_eval.num_layers, 1, self.Q_eval.lstm_units).to(self.Q_eval.device) for idx in sequential_batch], dim=1))
-
-            # Then we get the hidden and cell states for the current states which correspond to "next" states.
-            hidden_states_next.append(T.cat([self.hidden_state_memory[idx] if self.hidden_state_memory[
-                                                                                    idx] is not None else T.zeros(
-                    self.Q_eval.num_layers, 1, self.Q_eval.lstm_units).to(self.Q_eval.device) for idx in sequential_batch], dim=1))
-            cell_states_next.append(T.cat([self.cell_state_memory[idx] if self.cell_state_memory[
-                                                                                idx] is not None else T.zeros(
-                    self.Q_eval.num_layers, 1, self.Q_eval.lstm_units).to(self.Q_eval.device) for idx in sequential_batch], dim=1))
-
-        if processed_states <= 0:
-            print("WARNING: No processed states!")
-            return 0
-
-        # Concatenate all accumulated data and states
-        state_batch = T.cat(state_batches, dim=0)
-        new_state_batch = T.cat(new_state_batches, dim=0)
-        action_batch = T.cat(action_batches, dim=0)
-        reward_batch = T.cat(reward_batches, dim=0)
-        terminal_batch = T.cat(terminal_batches, dim=0)
-        hidden_state = T.cat(hidden_states, dim=1)
-        cell_state = T.cat(cell_states, dim=1)
-        hidden_state_next = T.cat(hidden_states_next, dim=1)
-        cell_state_next = T.cat(cell_states_next, dim=1)
+        (states, actions, rewards, next_states, dones, indices, weights,
+         hidden_states, cell_states, next_hidden_states, next_cell_states) = self.replay_buffer.sample(batch_size, beta=0.4)
 
         # Forward pass for current and next state batches
-        actions, _ = self.Q_eval(state_batch, hidden_state=hidden_state, cell_state=cell_state)
-        q_eval = actions.gather(1, action_batch.unsqueeze(-1)).squeeze(-1)
+        _actions, _ = self.Q_eval(states, hidden_state=hidden_states, cell_state=cell_states)
+        q_eval = _actions.gather(1, actions.unsqueeze(-1)).squeeze(-1)
 
-        q_next, _ = self.Q_eval(new_state_batch, hidden_state=hidden_state_next, cell_state=cell_state_next)
-        q_target_next, _ = self.Q_target(new_state_batch, hidden_state=hidden_state_next, cell_state=cell_state_next)
+        q_next, _ = self.Q_eval(next_states, hidden_state=next_hidden_states, cell_state=next_cell_states)
+        q_target_next, _ = self.Q_target(next_states, hidden_state=next_hidden_states, cell_state=next_cell_states)
 
         max_next_actions = T.argmax(q_next, dim=1)
         max_q_next = q_target_next.gather(1, max_next_actions.unsqueeze(-1)).squeeze(-1)
-        terminal_batch = terminal_batch.bool()
-        max_q_next[terminal_batch] = 0.0
+        max_q_next[dones] = 0.0
 
         # Calculate the Q target and loss
-        q_target = reward_batch + self.gamma * max_q_next
+        q_target = rewards + self.gamma * max_q_next
+
+        td_error = abs(q_target - q_eval).detach().cpu().numpy()
+
+        self.replay_buffer.update_priorities(indices, td_error)
+
         loss = self.Q_eval.loss(q_target, q_eval)
         loss.backward()
 
