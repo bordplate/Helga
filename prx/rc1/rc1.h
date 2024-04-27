@@ -129,8 +129,12 @@ extern int player_health;
 // Which player type the player is
 extern char player_type;
 
-extern Vec3 camera_pos;
-extern Vec3 camera_rot;
+extern Vec4 camera_pos;
+extern Vec4 camera_rot;
+
+extern Vec4 camera_forward;
+extern Vec4 camera_right;
+extern Vec4 camera_up;
 
 extern int player_animation_duration;
 

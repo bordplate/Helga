@@ -73,3 +73,16 @@ Moby* Moby::find_first(unsigned short o_class) {
 
     return nullptr;
 }
+
+Moby* Moby::find_last(unsigned short o_class) {
+    Moby *last;
+
+    for (Moby *moby = moby_ptr; moby <= moby_ptr_end; moby++) {
+        if (moby->state < 0x7f && moby->oClass == o_class) {
+            Logger::debug("Found moby with oClass: %d", moby->oClass);
+            last = moby;
+        }
+    }
+
+    return last;
+}

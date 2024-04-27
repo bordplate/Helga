@@ -1,30 +1,32 @@
 import time
 import numpy as np
 
-from game import Vector3
-from game import Game
+from Game import Vector3
+from Game import Game
 
 
 class RatchetEnvironment:
-    def __init__(self):
-        self.game = Game()
+    def __init__(self, process_name="rpcs3.exe"):
+        self.game = Game(process_name=process_name)
 
         self.checkpoints_template = [
-            Vector3(213.6437530517578, 232.98785400390625, 76.0),
-            Vector3(168.9180450439453, 234.16783142089844, 75.97647857666016),
-            Vector3(121.3829345703125, 262.2883605957031, 76.0),
-            Vector3(73.7027587890625, 293.1028747558594, 68.0),
-            Vector3(71.1695, 340.3349, 68.0),
-            Vector3(81.04218292236328, 370.8876953125, 68.0),
-            Vector3(100.66133117675781, 422.2431640625, 68.0),
-            Vector3(129.94361877441406, 464.2681579589844, 68.0),
-            Vector3(167.47509765625, 447.53363037109375, 70.28053283691406),
-            Vector3(199.3822784423828, 425.5357360839844, 68.0),
-            Vector3(251.841064453125, 437.9490966796875, 65.90913391113281),
-            Vector3(304.7581481933594, 451.1502990722656, 67.72925567626953),
-            Vector3(341.3725891113281, 435.3643798828125, 71.55968475341797),
-            Vector3(320.5064697265625, 393.40325927734375, 75.61055755615234),
-            Vector3(282.5606384277344, 346.9862365722656, 73.0411605834961),
+            Vector3(226, 143, 49.5),
+            Vector3(213, 141, 57),
+            Vector3(198, 140, 64),
+            Vector3(198, 147, 77.5),
+            Vector3(140, 161, 50.5),
+            Vector3(114, 200, 63),
+            Vector3(142, 197, 70),
+            Vector3(130, 189, 89),
+            Vector3(117, 86, 66),
+            Vector3(136, 114, 70),
+            Vector3(201, 128, 50),
+        ]
+
+        # [x, y] bounds of the level
+        self.bounds = [
+            [91, 234],
+            [260, 40],
         ]
 
         self.checkpoints = []
@@ -38,6 +40,8 @@ class RatchetEnvironment:
         self.n_checkpoints = 0
 
         self.distance_from_checkpoint_per_step = []
+        self.time_since_last_checkpoint = 0
+        self.closest_distance_to_checkpoint = 99999
 
         self.skid_address = 0
         self.jump_debounce = 0
@@ -60,8 +64,11 @@ class RatchetEnvironment:
 
     def reset(self):
         # Check that we've landed on the right level yet
-        while self.game.get_current_level() != 5:
-            print("Waiting for Rilgar level change...")
+        while self.game.get_current_level() != 3:
+            print("Waiting for Kerwan level change...")
+
+            if self.game.must_restart:
+                self.game.restart()
 
             time.sleep(1)
 
@@ -75,6 +82,9 @@ class RatchetEnvironment:
         self.n_checkpoints = 0
         self.jump_debounce = 0
         self.frames_moving_away_from_checkpoint = 0
+
+        self.time_since_last_checkpoint = 0
+        self.closest_distance_to_checkpoint = 999999
 
         self.reward_counters = {
             'rewards/timeout_penalty': 0,
@@ -103,23 +113,25 @@ class RatchetEnvironment:
                                             checkpoint.z))
 
         # Reset game and player state to start a new episode
-        self.game.set_player_state(0)
-
-        self.game.start_hoverboard_race()
-
-        self.game.frame_advance()
+        # self.game.set_player_state(0)
 
         # Set player back to full health, just in case
         self.game.set_nanotech(4)
 
-        self.distance_from_checkpoint_per_step = []
+        self.game.set_player_position(Vector3(259, 143, 49.5))
+        self.game.set_player_rotation(Vector3(0, 0, -2.5))
+        self.game.set_player_speed(0)
+        self.game.set_item_unlocked(2)
 
         # Clear game inputs so we don't keep moving from the last episode
         self.game.set_controller_input(0)
 
-        # Frame advance a couple of frames before giving control
-        for _ in range(10):
-            self.game.frame_advance()
+        # while self.game.get_player_state() != 107:
+        #     self.game.start_hoverboard_race()
+        #
+        #     self.game.frame_advance()
+
+        self.distance_from_checkpoint_per_step = []
 
         # Step once to get the first observation
         return self.step(0)
@@ -129,17 +141,28 @@ class RatchetEnvironment:
 
         self.timer += 1
 
-        if self.timer > 30 * 60 * 5:  # 5 minutes
-            terminal = True
-            self.reward_counters['rewards/timeout_penalty'] += 1
-            reward -= 1.0
-            print("Timeout!")
+        # if self.timer > 30 * 60 * 5:  # 5 minutes
+        #     terminal = True
+        #     self.reward_counters['rewards/timeout_penalty'] += 1
+        #     reward -= 1.0
+        #     print("Timeout!")
 
         actions_mapping = [
             0x0,     # No action
-            0x40,    # Jump
-            0x2000,  # Left
-            0x8000,  # Right
+            0x8,     # R1
+            0x40,    # Cross
+            0x80,    # Square
+            0x1000,  # Up
+            0x2000,  # Right
+            0x4000,  # Down
+            0x8000,  # Left
+
+            0x8 | 0x40,  # R1 + Cross
+
+            0x40 | 0x1000,  # Cross + Up
+            0x40 | 0x2000,  # Cross + Right
+            0x40 | 0x4000,  # Cross + Down
+            0x40 | 0x8000,  # Cross + Left
         ]
 
         # Discourage excessive jumping because it's annoying
@@ -163,10 +186,13 @@ class RatchetEnvironment:
         checkpoint_position = self.checkpoints[self.checkpoint]
 
         # Check that agent is moving towards the next checkpoint
-        pre_distance_from_checkpoint = pre_player_position.distance_to_2d(checkpoint_position)
+        pre_distance_from_checkpoint = pre_player_position.distance_to(checkpoint_position)
 
-        pre_check_delta_x, pre_check_delta_y = (checkpoint_position.x - pre_player_position.x,
-                                                checkpoint_position.y - pre_player_position.y)
+        pre_check_delta_x, pre_check_delta_y, pre_check_delta_z = (
+            checkpoint_position.x - pre_player_position.x,
+            checkpoint_position.y - pre_player_position.y,
+            checkpoint_position.z - pre_player_position.z
+        )
 
         pre_angle = np.arctan2(checkpoint_position.y - pre_player_position.y, checkpoint_position.x - pre_player_position.x) - pre_player_rotation.z
 
@@ -185,14 +211,30 @@ class RatchetEnvironment:
         player_state = self.game.get_player_state()
 
         # Calculate new distances, deltas and differences
-        check_delta_x, check_delta_y = (checkpoint_position.x - position.x,
-                                        checkpoint_position.y - position.y)
+        check_delta_x, check_delta_y, check_delta_z = (
+            checkpoint_position.x - position.x,
+            checkpoint_position.y - position.y,
+            checkpoint_position.z - position.z
+        )
 
-        check_delta_x, check_delta_y = pre_check_delta_x - check_delta_x, pre_check_delta_y - check_delta_y
+        check_delta_x, check_delta_y, check_delta_z = (
+            pre_check_delta_x - check_delta_x,
+            pre_check_delta_y - check_delta_y,
+            pre_check_delta_z - check_delta_z
+        )
 
-        check_diff_x, check_diff_y = max(-1, min(1, check_delta_x)), max(-1, min(1, check_delta_y))
+        check_diff_x, check_diff_y, check_diff_z = (
+            max(-1, min(1, check_delta_x)), max(-1, min(1, check_delta_y)), max(-1, min(1, check_delta_z))
+        )
 
-        distance_from_checkpoint = self.game.get_player_position().distance_to_2d(checkpoint_position)
+        distance_from_checkpoint = self.game.get_player_position().distance_to(checkpoint_position)
+
+        # Check that the player is within the bounds of the level
+        if position.x < self.bounds[0][0] or position.y > self.bounds[0][1] or \
+                position.x > self.bounds[1][0] or position.y < self.bounds[1][1]:
+            terminal = True
+            self.reward_counters['rewards/void_penalty'] += 1
+            reward -= 1.0
 
         # We want to discourage the agent from moving away from the checkpoint, but we don't want to penalize it
         #  too much for doing so because it's not always possible to move directly towards the checkpoint.
@@ -201,19 +243,28 @@ class RatchetEnvironment:
         elif self.frames_moving_away_from_checkpoint > 20:
             self.frames_moving_away_from_checkpoint = 20
 
-        if distance_from_checkpoint < pre_distance_from_checkpoint:
-            if pre_distance_from_checkpoint - distance_from_checkpoint < 2:
-                self.reward_counters['rewards/distance_from_checkpoint_reward'] += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.005
-                reward += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.005
+        if distance_from_checkpoint < pre_distance_from_checkpoint and distance_from_checkpoint < self.closest_distance_to_checkpoint:
+            dist = pre_distance_from_checkpoint - distance_from_checkpoint
+            if dist < 2 and dist > 0.01:
+                self.reward_counters['rewards/distance_from_checkpoint_reward'] += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.5
+                reward += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.5
                 self.frames_moving_away_from_checkpoint -= 0
         else:
             self.frames_moving_away_from_checkpoint += 1
 
-            self.reward_counters['rewards/distance_from_checkpoint_penalty'] += 0.005 + (self.frames_moving_away_from_checkpoint * 0.001)
-            reward -= 0.005 + (self.frames_moving_away_from_checkpoint * 0.001)
+            self.reward_counters['rewards/distance_from_checkpoint_penalty'] += 0.001 + (self.frames_moving_away_from_checkpoint * 0.001)
+            reward -= 0.001 + (self.frames_moving_away_from_checkpoint * 0.001)
 
-        # If agent is within 15 units of checkpoint, go to next checkpoint or loop around
-        if distance_from_checkpoint < 15:
+        if distance_from_checkpoint < self.closest_distance_to_checkpoint:
+            self.closest_distance_to_checkpoint = distance_from_checkpoint
+
+        self.time_since_last_checkpoint += 1
+
+        # If agent is within 4 units of checkpoint, go to next checkpoint or loop around
+        if distance_from_checkpoint < 4:
+            self.time_since_last_checkpoint = 0
+            self.closest_distance_to_checkpoint = 999999
+
             self.checkpoint += 1
             self.n_checkpoints += 1
             if self.checkpoint >= len(self.checkpoints):
@@ -223,28 +274,18 @@ class RatchetEnvironment:
             reward += 1.5 * self.n_checkpoints
 
             checkpoint_position = self.checkpoints[self.checkpoint]
-            distance_from_checkpoint = self.game.get_player_position().distance_to_2d(checkpoint_position)
+            distance_from_checkpoint = self.game.get_player_position().distance_to(checkpoint_position)
 
         # Various speed related rewards and penalties
 
-        # Check that the agent is moving and isn't stuck in place
-        if speed < 0.1:
-            self.stalled_timer += 1
-            if self.stalled_timer > 30 * 5:  # 5 in-game seconds
-                terminal = True
-                self.reward_counters['rewards/timeout_penalty'] += 1
-                reward -= 1.0
-                print("Stalled!")
-        else:
-            self.stalled_timer = 0
+        # Check that the agent hasn't stopped progressing
+        if self.time_since_last_checkpoint > 30 * 30:  # 30 in-game seconds
+            terminal = True
+            self.reward_counters['rewards/timeout_penalty'] += 1
+            reward -= 1.0
 
-        # Encourage higher speed
-        if speed > 0.25:
-            self.reward_counters['rewards/speed_reward'] += (speed - 0.25) * 0.05
-            reward += (speed - 0.25) * 0.05
-
-        # Discourage stalling
-        if speed < 0.22 and self.timer > 30:
+        # Discourage standing still
+        if speed <= 0.01 and self.timer > 30 * 5:
             self.reward_counters['rewards/stall_penalty'] += 0.05
             reward -= 0.05
 
@@ -255,10 +296,11 @@ class RatchetEnvironment:
         if abs(angle) < 0.1:
             self.reward_counters['rewards/facing_checkpoint_reward'] += 0.02
             reward += 0.02
-        elif abs(angle) < abs(pre_angle):
-            # Give reward for moving to face the checkpoint
-            self.reward_counters['rewards/rotating_to_face_checkpoint_reward'] += 0.01
-            reward += 0.01
+        # elif abs(angle) < abs(pre_angle):
+        #     # Give reward for moving to face the checkpoint
+        #     self.reward_counters['rewards/rotating_to_face_checkpoint_reward'] += 0.01
+        #     reward += 0.01
+        #     print("Rotating")
 
         # We mostly collect position data to calculate distance traveled for metrics, and don't specifically use it for
         #   rewards or penalties.
@@ -278,34 +320,14 @@ class RatchetEnvironment:
             if distance_from_ground < 20:
                 self.distance += distance
 
-        if player_state == 109 or player_state == 110 or player_state == 111:
-            self.reward_counters['rewards/death_penalty'] += 1.0
-            reward -= 1.0
-            terminal = True
+        # if player_state == 109 or player_state == 110 or player_state == 111:
+        #     self.reward_counters['rewards/death_penalty'] += 1.0
+        #     reward -= 1.0
+        #     terminal = True
 
         self.distance_from_checkpoint_per_step.append(distance_from_checkpoint)
 
-        coll_f, coll_u, coll_d, coll_l, coll_r, coll_cf, coll_cu, coll_cd, coll_cl, coll_cr = self.game.get_collisions()
-
         # Penalize various collisions
-
-        # Wall collision
-        if coll_f != -32.0 and coll_u != -32.0 and coll_f < 10.5 and coll_u < 15.5 and coll_cf == 0:
-            reward -= 0.1
-            self.reward_counters['rewards/wall_crash_penalty'] += 0.1
-
-        # TNT crate collision
-        if (
-                (coll_f != -32.0 and coll_f < 10.5 and coll_cf == 505) or
-                (coll_d != -32.0 and coll_d < 5.5 and coll_cd == 505)
-        ):
-            reward -= 0.2
-            self.reward_counters['rewards/tnt_crash_penalty'] += 0.2
-
-        # Going over void, e.g. outside the course in many cases
-        if distance_from_ground > 31 and coll_d <= -32.0:
-            self.reward_counters['rewards/void_penalty'] += 0.2
-            reward -= 0.2
 
         # Build observation state
         state = [
@@ -314,20 +336,22 @@ class RatchetEnvironment:
             np.interp(position.z, (-150, 150), (-1, 1)),  # 2
             np.interp(checkpoint_position.x, (0, 500), (-1, 1)),  # 3
             np.interp(checkpoint_position.y, (0, 500), (-1, 1)),  # 4
-            check_diff_x,  # 5
-            check_diff_y,  # 6
-            np.interp(player_rotation.z, (-20, 20), (-1, 1)),  # 7
-            np.interp(distance_from_ground, (-64, 64), (-1, 1)),  # 8
-            np.interp(speed, (0, 2), (-1, 1)),  # 9
-            np.interp(distance_from_checkpoint, (0, 500), (-1, 1)),  # 10
-            np.interp(player_state, (0, 255), (-1, 1)),  # 11
-            np.interp(self.distance_traveled, (0, 100000), (-1, 1)),  # 12
-            *self.game.get_collisions_normalized()  # 13-23
+            np.interp(checkpoint_position.z, (-150, 150), (-1, 1)),  # 5
+            check_diff_x,  # 6
+            check_diff_y,  # 7
+            check_diff_z,  # 8
+            np.interp(player_rotation.z, (-20, 20), (-1, 1)),  # 9
+            np.interp(distance_from_ground, (-64, 64), (-1, 1)),  # 10
+            np.interp(speed, (0, 2), (-1, 1)),  # 11
+            np.interp(distance_from_checkpoint, (0, 500), (-1, 1)),  # 12
+            np.interp(player_state, (0, 255), (-1, 1)),  # 13
+            np.interp(self.game.get_oscillation_offset(), (-10, 10), (-1, 1)),  # 14
+            *self.game.get_collisions()  # 64 collisions + 64 classes
         ]
 
         # Does the reward actually need to be normalized?
         if reward > 20 or reward < -20:
-            print(f"Danger! Reward out of bounds: {reward}")
+            #print(f"Danger! Reward out of bounds: {reward}")
 
             # Clamp
             reward = max(-20, min(20, reward))
@@ -335,7 +359,7 @@ class RatchetEnvironment:
         # Iterate through the state to check that none of the values are above 1 or below -1
         for s, state_value in enumerate(state):
             if state_value > 1.0 or state_value < -1.0:
-                print(f"Danger! State out of bounds: {s}. Value: {state_value}")
+                #print(f"Danger! State out of bounds: {s}. Value: {state_value}")
                 exit(0)
 
         return np.array(state, dtype=np.float32), reward, terminal
@@ -343,29 +367,38 @@ class RatchetEnvironment:
 
 # Just used for various tests of the environment
 if __name__ == '__main__':
-    env = RatchetEnvironment()
-    env.start()
-
     try:
-        steps = 0
-        next_frame_time = time.time()
-
-        env.reset()
-
-        last_checkpoint = None
+        env = RatchetEnvironment()
+        env.start()
 
         while True:
-            current_time = time.time()
+            steps = 0
+            next_frame_time = time.time()
 
-            input()
+            env.reset()
 
-            current_position = env.game.get_player_position()
-            print(f"[{current_position.x}, {current_position.y}, {current_position.z}, {env.game.get_player_rotation().z}],", end="")
+            last_checkpoint = None
 
-            # Schedule next frame
-            next_frame_time += 1 / 60  # Schedule for the next 1/60th second
-            time.sleep(0.016)
+            total_reward = 0
 
-            steps += 1
+            while True:
+                current_time = time.time()
+
+                _, reward, terminal = env.step(0)
+
+                total_reward += reward
+
+                # if terminal:
+                #     print(f"\nTotal reward: {total_reward}")
+                #     break
+
+                current_position = env.game.get_player_position()
+                print(f"\r[{current_position.x}, {current_position.y}, {current_position.z}, {env.game.get_player_rotation().z}],", end="")
+
+                # Schedule next frame
+                next_frame_time += 1 / 60  # Schedule for the next 1/60th second
+                time.sleep(0.016)
+
+                steps += 1
     except KeyboardInterrupt:
         env.stop()

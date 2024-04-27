@@ -183,6 +183,7 @@ struct Moby {
     static Moby* spawn(unsigned short o_class, unsigned short flags, uint16_t modeBits);
 
     static Moby* find_first(unsigned short o_class);
+    static Moby* find_last(unsigned short o_class);
 #endif
 }
 #ifdef __cplusplus

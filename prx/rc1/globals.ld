@@ -27,7 +27,10 @@ moby_ptr = 0xa390a0;
 moby_ptr_end = 0xa390a8;
 
 camera_pos = 0x951500;
-camera_rot = 0x95150c;
+camera_rot = 0x951510;
+camera_forward = 0x9513c0;
+camera_right = 0x9513d0;
+camera_up = 0x9513e0;
 
 pressed_buttons = 0x964ae4;
 held_buttons = 0x964ae0;

@@ -14,20 +14,20 @@ void RemoteView::on_load() {
     right_text_ = new TextElement(75, 100, "<ping>");
 
 //    add_element(memory_info_text_);
-    add_element(ping_text_);
-    add_element(up_text_);
-    add_element(down_text_);
-    add_element(left_text_);
-    add_element(right_text_);
+//    add_element(ping_text_);
+//    add_element(up_text_);
+//    add_element(down_text_);
+//    add_element(left_text_);
+//    add_element(right_text_);
 }
 
 void RemoteView::render() {
-    memory_info_text_->text->setf("mem: %d/%d (%d)", used_memory, sizeof(memory_area), num_allocated);
-    ping_text_->text->setf("collF: %.2f (%d)", this->coll, this->coll_class);
-    up_text_->text->setf("collU: %.2f (%d)", this->coll_up, this->coll_up_class);
-    down_text_->text->setf("collD: %.2f (%d)", this->coll_down, this->coll_down_class);
-    left_text_->text->setf("collL: %.2f (%d)", this->coll_left, this->coll_left_class);
-    right_text_->text->setf("collR: %.2f (%d)", this->coll_right, this->coll_right_class);
+//    memory_info_text_->text->setf("mem: %d/%d (%d)", used_memory, sizeof(memory_area), num_allocated);
+//    ping_text_->text->setf("collF: %.2f (%d)", this->coll, this->coll_class);
+//    up_text_->text->setf("collU: %.2f (%d)", this->coll_up, this->coll_up_class);
+//    down_text_->text->setf("collD: %.2f (%d)", this->coll_down, this->coll_down_class);
+//    left_text_->text->setf("collL: %.2f (%d)", this->coll_left, this->coll_left_class);
+//    right_text_->text->setf("collR: %.2f (%d)", this->coll_right, this->coll_right_class);
 
     View::render();
 }

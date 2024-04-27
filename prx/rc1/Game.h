@@ -9,6 +9,8 @@
 
 #include "View.h"
 
+#define death_count *((int*)0xB00500)
+
 struct Game {
 public:
     static Game& shared() {
@@ -35,10 +37,16 @@ private:
 
     View* current_view;
 
-    Moby* test_moby;
-    Moby* test_moby_a;
-    Moby* test_moby_r;
-    Moby* test_moby_l;
+//    Moby* test_moby;
+//    Moby* test_moby_a;
+//    Moby* test_moby_r;
+//    Moby* test_moby_l;
+
+    int last_death_count;
+
+    Moby* camera_moby;
+
+    bool oscillation_direction;
 };
 
 

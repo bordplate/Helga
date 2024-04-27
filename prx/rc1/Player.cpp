@@ -15,5 +15,5 @@ void Player::on_tick() {
 }
 
 void Player::on_respawned() {
-
+    death_count += 1;
 }

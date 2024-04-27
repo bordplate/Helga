@@ -25,6 +25,9 @@ class Vector3(ctypes.Structure):
     def distance_to_2d(self, other):
         return ((self.x - other.x) ** 2 + (self.y - other.y) ** 2) ** 0.5
 
+    def distance_to(self, other):
+        return ((self.x - other.x) ** 2 + (self.y - other.y) ** 2 + (self.z - other.z) ** 2) ** 0.5
+
 
 class Process:
     def __init__(self, process_name, base_offset=0):
@@ -130,6 +133,12 @@ class Game:
     player_speed_address = 0x969e74
     current_planet_address = 0x969C70
     nanotech_address = 0x96BF8B
+    items_address = 0x96C140
+
+    collisions_address = 0xB00100
+    collisions_class_address = 0xB00200
+
+    oscillation_offset_address = 0xB00060
 
     coll_forward_address = 0xB00030
     coll_up_address = 0xB00034
@@ -143,20 +152,31 @@ class Game:
     coll_class_left_address = 0xB00048
     coll_class_right_address = 0xB0004c
 
-    def __init__(self):
-        self.process = Process("rpcs3.exe", base_offset=self.offset)
+    def __init__(self, process_name="rpcs3.exe"):
+        self.process_name = process_name
+
+        self.process = Process(self.process_name, base_offset=self.offset)
         self.last_frame_count = 0
         self.must_restart = False
 
     def open_process(self):
+        self.process = Process(self.process_name, base_offset=self.offset)
         return self.process.open_process()
 
     def close_process(self):
         self.process.close_process()
         self.process = None
 
+    def restart(self):
+        self.close_process()
+        self.open_process()
+        self.must_restart = False
+
     def set_controller_input(self, controller_input):
         self.process.write_int(self.input_address, controller_input)
+
+    def set_item_unlocked(self, item_id):
+        self.process.write_byte(self.items_address + item_id, 1)
 
     def get_current_frame_count(self):
         frames_buffer = self.process.read_memory(self.frame_count_address, 4)
@@ -183,8 +203,12 @@ class Game:
     def set_player_state(self, state):
         self.process.write_int(self.player_state_address, state)
 
+
     def get_distance_from_ground(self):
         return self.process.read_float(self.dist_from_ground_address)
+
+    def set_player_speed(self, speed):
+        self.process.write_float(self.player_speed_address, speed)
 
     def get_player_speed(self):
         return self.process.read_float(self.player_speed_address)
@@ -212,6 +236,24 @@ class Game:
         ctypes.memmove(ctypes.byref(skid_position), skid_position_buffer, ctypes.sizeof(skid_position))
 
         return skid_position
+
+    def set_player_position(self, position: Vector3):
+        position_x = struct.pack('>f', position.x)
+        position_y = struct.pack('>f', position.y)
+        position_z = struct.pack('>f', position.z)
+
+        self.process.write_memory(self.player_position_address, position_x)
+        self.process.write_memory(self.player_position_address + 4, position_y)
+        self.process.write_memory(self.player_position_address + 8, position_z)
+
+    def set_player_rotation(self, rotation: Vector3):
+        rotation_x = struct.pack('>f', rotation.x)
+        rotation_y = struct.pack('>f', rotation.y)
+        rotation_z = struct.pack('>f', rotation.z)
+
+        self.process.write_memory(self.player_rotation_address, rotation_x)
+        self.process.write_memory(self.player_rotation_address + 4, rotation_y)
+        self.process.write_memory(self.player_rotation_address + 8, rotation_z)
 
     def get_player_position(self) -> Vector3:
         """Player position is stored in big endian, so we need to convert it to little endian."""
@@ -247,7 +289,34 @@ class Game:
 
         return player_rotation
 
-    def get_collisions(self):
+    def get_collisions(self, normalized=True):
+        collisions = []
+        classes = []
+
+        # 8 rows, 8 columns
+        for i in range(8):
+            for j in range(8):
+                offset = 4 * (i * 8 + j)
+
+                collision_address = self.collisions_address + offset
+                collision_value = self.process.read_float(collision_address)
+
+                class_address = self.collisions_class_address + offset
+                class_value = self.process.read_int(class_address)
+
+                if normalized:
+                    collision_value = np.interp(collision_value, [-32, 64], [-1, 1])
+                    class_value = np.interp(class_value, [-2, 4096], [-1, 1])
+
+                collisions.append(collision_value)
+                classes.append(class_value)
+
+        return [*collisions, *classes]
+
+    def get_oscillation_offset(self):
+        return self.process.read_float(self.oscillation_offset_address)
+
+    def get_collisions_old(self):
         coll_forward = self.process.read_float(self.coll_forward_address)
         coll_up = self.process.read_float(self.coll_up_address)
         coll_down = self.process.read_float(self.coll_down_addrss)
@@ -259,22 +328,6 @@ class Game:
         coll_class_down = self.process.read_int(self.coll_class_down_address)
         coll_class_left = self.process.read_int(self.coll_class_left_address)
         coll_class_right = self.process.read_int(self.coll_class_right_address)
-
-        return (coll_forward, coll_up, coll_down, coll_left, coll_right,
-                coll_class_forward, coll_class_up, coll_class_down, coll_class_left, coll_class_right)
-
-    def get_collisions_normalized(self):
-        coll_forward = np.interp(self.process.read_float(self.coll_forward_address), (-33, 256), (-1, 1))
-        coll_up = np.interp(self.process.read_float(self.coll_up_address), (-33, 256), (-1, 1))
-        coll_down = np.interp(self.process.read_float(self.coll_down_addrss), (-33, 256), (-1, 1))
-        coll_left = np.interp(self.process.read_float(self.coll_left_address), (-33, 256), (-1, 1))
-        coll_right = np.interp(self.process.read_float(self.coll_right_address), (-33, 256), (-1, 1))
-
-        coll_class_forward = np.interp(self.process.read_int(self.coll_class_forward_address), (0, 16384), (-1, 1))
-        coll_class_up = np.interp(self.process.read_int(self.coll_class_up_address), (0, 16384), (-1, 1))
-        coll_class_down = np.interp(self.process.read_int(self.coll_class_down_address), (0, 16384), (-1, 1))
-        coll_class_left = np.interp(self.process.read_int(self.coll_class_left_address), (0, 16384), (-1, 1))
-        coll_class_right = np.interp(self.process.read_int(self.coll_class_right_address), (0, 16384), (-1, 1))
 
         return (coll_forward, coll_up, coll_down, coll_left, coll_right,
                 coll_class_forward, coll_class_up, coll_class_down, coll_class_left, coll_class_right)
@@ -293,8 +346,7 @@ class Game:
 
         while frame_count == self.last_frame_count:
             if self.must_restart:
-                self.process.open_process()
-                self.must_restart = False
+                self.restart()
 
                 return False
 

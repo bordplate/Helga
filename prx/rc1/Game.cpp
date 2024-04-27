@@ -55,6 +55,12 @@ LogLevel Logger::log_level_ = Debug;
 #define collision_class_right *((int*)0xB0004c)
 #define collision_class_down *((int*)0xB00054)
 
+#define oscillation_offset *((float*)0xB00060)
+#define collisions_distance ((float*)0xB00100)
+#define collisions_class ((int*)0xB00200)
+
+#define collisions_mobys ((Moby**)0xB00300)
+
 struct Vector2D {
     double x;
     double y;
@@ -85,6 +91,13 @@ struct Vector2D {
 void Game::start() {
     hoverboard_lady_address = 0;
     skid_address = 0;
+
+    // Clear all collision_mobys
+    for (int i = 0; i < 64; i++) {
+        collisions_mobys[i] = nullptr;
+    }
+
+    death_count = 0;
 }
 
 void Game::on_tick() {
@@ -105,27 +118,27 @@ void Game::on_tick() {
         seen_planets[0] = 1;
         seen_planets[5] = 1;
         *(int*)0xa10700 = 1;
-        *(int*)0xa10704 = (int)5;
+        *(int*)0xa10704 = (int)3;
         //*(int*)0x969c70 = (int)5;
     }
 
-    if (hoverboard_lady_address == 0) {
-        hoverboard_lady_address = (uint32_t)Moby::find_first(918);
-    } else {
-        Moby* hoverboard_lady = (Moby*)hoverboard_lady_address;
-        if (hoverboard_lady->oClass != 918 || hoverboard_lady->state >= 0x7f) {
-            hoverboard_lady_address = (uint32_t)Moby::find_first(918);
-        }
-    }
+//    if (hoverboard_lady_address == 0) {
+//        hoverboard_lady_address = (uint32_t)Moby::find_first(918);
+//    } else {
+//        Moby* hoverboard_lady = (Moby*)hoverboard_lady_address;
+//        if (hoverboard_lady->oClass != 918 || hoverboard_lady->state >= 0x7f) {
+//            hoverboard_lady_address = (uint32_t)Moby::find_first(918);
+//        }
+//    }
 
-    if (skid_address == 0) {
-        skid_address = (uint32_t)Moby::find_first(717);
-    } else {
-        Moby* skid = (Moby*)skid_address;
-        if (skid->oClass != 717 || skid->state >= 0x7f) {
-            skid_address = (uint32_t)Moby::find_first(717);
-        }
-    }
+//    if (skid_address == 0) {
+//        skid_address = (uint32_t)Moby::find_first(717);
+//    } else {
+//        Moby* skid = (Moby*)skid_address;
+//        if (skid->oClass != 717 || skid->state >= 0x7f) {
+//            skid_address = (uint32_t)Moby::find_first(717);
+//        }
+//    }
 
     if (!current_view) {
         RemoteView* view = new RemoteView();
@@ -174,67 +187,142 @@ void Game::on_tick() {
 //            Logger::debug("%f, %f, %f", forward.x, forward.y, forward.z);
 //        }
 
-        Vec4 forward = ratchet_moby->forward;
-
-        // Calculate left and right directions
-        Vec4 right = ratchet_moby->right;
-
-        Vec4 left = Vec4();
-        left.x = -right.x;
-        left.y = -right.y;
-        left.z = -right.z;
-        left.w = right.w;
-
-        float ray_distance = 64.0f;
-        float ray_wide = 64.0f;
-
-        float fov = 64.0f;
-        int rows = 64;
-        int cols = 64;
-
         // Raycast in a grid pattern extending from the player with the given fov
-        for (int i = 0; i <= rows; i++) {
-            for (int j = 0; j <= cols; j++) {
-                Vec4 ray = Vec4();
-                ray.x = player_pos.x + ray_distance * forward.x + (fov/rows) * i * left.x + (fov/cols) * j * right.x;
-                ray.y = player_pos.y + ray_distance * forward.y + (fov/rows) * i * left.y + (fov/cols) * j * right.y;
-                ray.z = player_pos.z + ray_distance * forward.z + (fov/rows) * i * left.z + (fov/cols) * j * right.z;
-                ray.w = 1;
+        // We also oscillate the rays to the left and right to get a wider field of view
 
+        if (oscillation_direction) {
+            oscillation_offset += 1.0f;
+        } else {
+            oscillation_offset -= 1.0f;
+        }
 
+        if (oscillation_offset > 10.0f) {
+            oscillation_direction = false;
+        } else if (oscillation_offset < -10.0f) {
+            oscillation_direction = true;
+        }
+
+        if (death_count != last_death_count) {
+            for (int i = 0; i < 64; i++) {
+                collisions_mobys[i] = nullptr;
             }
         }
 
-        Vec4 ahead = Vec4();
-        ahead.x = player_pos.x + ray_distance * forward.x;
-        ahead.y = player_pos.y + ray_distance * forward.y;
-        ahead.z = player_pos.z + ray_distance * forward.z;
-        ahead.w = 1;
+        last_death_count = death_count;
 
-        Vec4 ahead_up = Vec4();
-        ahead_up.x = player_pos.x + ray_distance * forward.x + (ray_wide/2) * ratchet_moby->up.x;
-        ahead_up.y = player_pos.y + ray_distance * forward.y + (ray_wide/2) * ratchet_moby->up.y;
-        ahead_up.z = player_pos.z + ray_distance * forward.z + (ray_wide/2) * ratchet_moby->up.z;
-        ahead_up.w = 1;
+        Vec4 forward = camera_forward;
+        forward.x = camera_forward.z;
+        forward.y = camera_right.z;
+        forward.z = camera_up.z;
+        forward.w = 0;
 
-        // Calculate ahead_left and ahead_right
-        Vec4 ahead_left = Vec4();
-        ahead_left.x = player_pos.x + ray_distance * forward.x + ray_wide * left.x;
-        ahead_left.y = player_pos.y + ray_distance * forward.y + ray_wide * left.y;
-        ahead_left.z = player_pos.z + ray_distance * forward.z + ray_wide * left.z;
-        ahead_left.w = 1;
+        Vec4 left = Vec4();
+        left.x = camera_forward.x;
+        left.y = camera_right.x;
+        left.z = camera_up.x;
+        left.w = 0;
 
-        Vec4 ahead_right = Vec4();
-        ahead_right.x = player_pos.x + ray_distance * forward.x + ray_wide * right.x;
-        ahead_right.y = player_pos.y + ray_distance * forward.y + ray_wide * right.y;
-        ahead_right.z = player_pos.z + ray_distance * forward.z + ray_wide * right.z;
-        ahead_right.w = 1;
+        Vec4 up = camera_up;
+        up.x = camera_forward.y;
+        up.y = camera_right.y;
+        up.z = camera_up.y;
 
-        Vec4 ahead_down = Vec4();
-        ahead_down.x = player_pos.x + ray_distance * forward.x - (ray_wide/2) * ratchet_moby->up.x;
-        ahead_down.y = player_pos.y + ray_distance * forward.y - (ray_wide/2) * ratchet_moby->up.y;
-        ahead_down.z = player_pos.z + ray_distance * forward.z - (ray_wide/2) * ratchet_moby->up.z;
-        ahead_down.w = 1;
+        float ray_distance = 64.0f;
+        float ray_wide = 90.0f;
+
+        float fov = 64.0f;
+        int rows = 8;
+        int cols = 8;
+
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++) {
+                Vec4 ray = Vec4();
+                ray.x = camera_pos.x + ray_distance * forward.x + (ray_wide * (j - cols/2) / cols) * left.x + (ray_wide * (i - rows/2) / rows) * up.x;
+                ray.y = camera_pos.y + ray_distance * forward.y + (ray_wide * (j - cols/2) / cols) * left.y + (ray_wide * (i - rows/2) / rows) * up.y;
+                ray.z = camera_pos.z + ray_distance * forward.z + (ray_wide * (j - cols/2) / cols) * left.z + (ray_wide * (i - rows/2) / rows) * up.z;
+                ray.w = 1;
+
+                // To avoid colliding with the camera itself, we start the ray a bit ahead of the camera
+                Vec4 ray_start = camera_pos;
+                ray_start.x += 0.5f * forward.x;
+                ray_start.y += 0.5f * forward.y;
+                ray_start.z += 0.5f * forward.z;
+
+                // Apply oscillation
+                ray.x += oscillation_offset * left.x;
+                ray.y += oscillation_offset * left.y;
+                ray.z += oscillation_offset * left.z;
+
+                int coll = coll_line(&ray_start, &ray, 0x24, nullptr, nullptr);
+
+//                Moby* test_moby = (Moby*)collisions_mobys[i * cols + j];
+
+                if (coll) {
+                    collisions_distance[i * cols + j] = distance(camera_pos, coll_output.ip);
+                    collisions_class[i * cols + j] = -1;
+
+                    if (coll_output.pMoby) {
+                        collisions_class[i * cols + j] = coll_output.pMoby->oClass;
+                    }
+
+                    // Update or create moby to show where the raycast hit
+//                    if (test_moby == nullptr || test_moby->state >= 0x7f) {
+//                        test_moby = Moby::spawn(500, 0, 0);
+//                        test_moby->pUpdate = nullptr;
+//                        test_moby->collision = nullptr;
+//                        test_moby->scale = 0.005f;
+//
+//                        collisions_mobys[i * cols + j] = test_moby;
+//
+//                        Logger::debug("Spawning new moby at %f, %f, %f", coll_output.ip.x, coll_output.ip.y, coll_output.ip.z);
+//                    }
+//
+//                    test_moby->position.x = coll_output.ip.x;
+//                    test_moby->position.y = coll_output.ip.y;
+//                    test_moby->position.z = coll_output.ip.z;
+//
+//                    Logger::debug("Collided with moby at %f, %f, %f", coll_output.ip.x, coll_output.ip.y, coll_output.ip.z);
+                } else {
+                    collisions_distance[i * cols + j] = -32.0f;
+                    collisions_class[i * cols + j] = -2;
+
+//                    if (test_moby != nullptr) {
+//                        test_moby->position.z = -100;
+//                    }
+                }
+            }
+        }
+
+//        Vec4 ahead = Vec4();
+//        ahead.x = player_pos.x + ray_distance * forward.x;
+//        ahead.y = player_pos.y + ray_distance * forward.y;
+//        ahead.z = player_pos.z + ray_distance * forward.z;
+//        ahead.w = 1;
+//
+//        Vec4 ahead_up = Vec4();
+//        ahead_up.x = player_pos.x + ray_distance * forward.x + (ray_wide/2) * ratchet_moby->up.x;
+//        ahead_up.y = player_pos.y + ray_distance * forward.y + (ray_wide/2) * ratchet_moby->up.y;
+//        ahead_up.z = player_pos.z + ray_distance * forward.z + (ray_wide/2) * ratchet_moby->up.z;
+//        ahead_up.w = 1;
+//
+//        // Calculate ahead_left and ahead_right
+//        Vec4 ahead_left = Vec4();
+//        ahead_left.x = player_pos.x + ray_distance * forward.x + ray_wide * left.x;
+//        ahead_left.y = player_pos.y + ray_distance * forward.y + ray_wide * left.y;
+//        ahead_left.z = player_pos.z + ray_distance * forward.z + ray_wide * left.z;
+//        ahead_left.w = 1;
+//
+//        Vec4 ahead_right = Vec4();
+//        ahead_right.x = player_pos.x + ray_distance * forward.x + ray_wide * right.x;
+//        ahead_right.y = player_pos.y + ray_distance * forward.y + ray_wide * right.y;
+//        ahead_right.z = player_pos.z + ray_distance * forward.z + ray_wide * right.z;
+//        ahead_right.w = 1;
+//
+//        Vec4 ahead_down = Vec4();
+//        ahead_down.x = player_pos.x + ray_distance * forward.x - (ray_wide/2) * ratchet_moby->up.x;
+//        ahead_down.y = player_pos.y + ray_distance * forward.y - (ray_wide/2) * ratchet_moby->up.y;
+//        ahead_down.z = player_pos.z + ray_distance * forward.z - (ray_wide/2) * ratchet_moby->up.z;
+//        ahead_down.w = 1;
 
 //        if (test_moby == nullptr) {
 //            test_moby = Moby::spawn(500, 0, 0);
@@ -276,98 +364,96 @@ void Game::on_tick() {
 //        test_moby_r->position.y = ahead_right.y;
 //        test_moby_r->position.z = ahead_right.z;
 
-        collision_ahead = -32.0f;
-        collision_up = -32.0f;
-        collision_down = -32.0f;
-        collision_left = -32.0f;
-        collision_right = -32.0f;
-
-        collision_class_ahead = 0;
-        collision_class_up = 0;
-        collision_class_down = 0;
-        collision_class_left = 0;
-        collision_class_right = 0;
-
-        Vec4 source_vect = Vec4(player_pos.x, player_pos.y, player_pos.z + 0.5f, player_pos.w);
-
-        // Collision checks
-        int coll_forward = coll_line(&source_vect, &ahead, 0x24, ratchet_moby, nullptr);
-
-        view->coll_class = 0;
-
-        if (coll_forward) {
-            collision_ahead = distance(source_vect, coll_output.ip);
-
-            if (coll_output.pMoby) {
-                collision_class_ahead = coll_output.pMoby->oClass;
-                view->coll_class = coll_output.pMoby->oClass;
-            }
-        }
-
-        int coll_up = coll_line(&source_vect, &ahead_up, 0x24, ratchet_moby, nullptr);
-
-        view->coll_up_class = 0;
-
-        if (coll_up) {
-            collision_up = distance(source_vect, coll_output.ip);
-
-            if (coll_output.pMoby) {
-            collision_class_up = coll_output.pMoby->oClass;
-            view->coll_up_class = coll_output.pMoby->oClass;
-            }
-        }
-
-        int coll_down = coll_line(&source_vect, &ahead_down, 0x24, ratchet_moby, nullptr);
-
-        view->coll_down_class = 0;
-
-        if (coll_down) {
-            collision_down = distance(source_vect, coll_output.ip);
-
-            if (coll_output.pMoby) {
-                collision_class_down = coll_output.pMoby->oClass;
-                view->coll_down_class = coll_output.pMoby->oClass;
-            }
-        }
-
-        int coll_left = coll_line(&source_vect, &ahead_left, 0x24, ratchet_moby, nullptr);
-
-        view->coll_left_class = 0;
-
-        if (coll_left) {
-            collision_left = distance(source_vect, coll_output.ip);
-
-            if (coll_output.pMoby) {
-                collision_class_left = coll_output.pMoby->oClass;
-                view->coll_left_class = coll_output.pMoby->oClass;
-            }
-        }
-
-        int coll_right = coll_line(&source_vect, &ahead_right, 0x24, ratchet_moby, nullptr);
-
-        view->coll_right_class = 0;
-
-        if (coll_right) {
-            collision_right = distance(source_vect, coll_output.ip);
-
-            if (coll_output.pMoby) {
-                collision_class_right = coll_output.pMoby->oClass;
-                view->coll_right_class = coll_output.pMoby->oClass;
-            }
-        }
-
-        view->coll = collision_ahead;
-        view->coll_up = collision_up;
-        view->coll_down = collision_down;
-        view->coll_left = collision_left;
-        view->coll_right = collision_right;
+//        collision_ahead = -32.0f;
+//        collision_up = -32.0f;
+//        collision_down = -32.0f;
+//        collision_left = -32.0f;
+//        collision_right = -32.0f;
+//
+//        collision_class_ahead = 0;
+//        collision_class_up = 0;
+//        collision_class_down = 0;
+//        collision_class_left = 0;
+//        collision_class_right = 0;
+//
+//        Vec4 source_vect = Vec4(player_pos.x, player_pos.y, player_pos.z + 0.5f, player_pos.w);
+//
+//        // Collision checks
+//        int coll_forward = coll_line(&source_vect, &ahead, 0x24, ratchet_moby, nullptr);
+//
+//        view->coll_class = 0;
+//
+//        if (coll_forward) {
+//            collision_ahead = distance(source_vect, coll_output.ip);
+//
+//            if (coll_output.pMoby) {
+//                collision_class_ahead = coll_output.pMoby->oClass;
+//                view->coll_class = coll_output.pMoby->oClass;
+//            }
+//        }
+//
+//        int coll_up = coll_line(&source_vect, &ahead_up, 0x24, ratchet_moby, nullptr);
+//
+//        view->coll_up_class = 0;
+//
+//        if (coll_up) {
+//            collision_up = distance(source_vect, coll_output.ip);
+//
+//            if (coll_output.pMoby) {
+//                collision_class_up = coll_output.pMoby->oClass;
+//                view->coll_up_class = coll_output.pMoby->oClass;
+//            }
+//        }
+//
+//        int coll_down = coll_line(&source_vect, &ahead_down, 0x24, ratchet_moby, nullptr);
+//
+//        view->coll_down_class = 0;
+//
+//        if (coll_down) {
+//            collision_down = distance(source_vect, coll_output.ip);
+//
+//            if (coll_output.pMoby) {
+//                collision_class_down = coll_output.pMoby->oClass;
+//                view->coll_down_class = coll_output.pMoby->oClass;
+//            }
+//        }
+//
+//        int coll_left = coll_line(&source_vect, &ahead_left, 0x24, ratchet_moby, nullptr);
+//
+//        view->coll_left_class = 0;
+//
+//        if (coll_left) {
+//            collision_left = distance(source_vect, coll_output.ip);
+//
+//            if (coll_output.pMoby) {
+//                collision_class_left = coll_output.pMoby->oClass;
+//                view->coll_left_class = coll_output.pMoby->oClass;
+//            }
+//        }
+//
+//        int coll_right = coll_line(&source_vect, &ahead_right, 0x24, ratchet_moby, nullptr);
+//
+//        view->coll_right_class = 0;
+//
+//        if (coll_right) {
+//            collision_right = distance(source_vect, coll_output.ip);
+//
+//            if (coll_output.pMoby) {
+//                collision_class_right = coll_output.pMoby->oClass;
+//                view->coll_right_class = coll_output.pMoby->oClass;
+//            }
+//        }
+//
+//        view->coll = collision_ahead;
+//        view->coll_up = collision_up;
+//        view->coll_down = collision_down;
+//        view->coll_left = collision_left;
+//        view->coll_right = collision_right;
     }
 
     custom_frame_count += 1;
 
-    while (progress_frame_count != custom_frame_count && current_planet != 0) {
-
-    }
+    while (progress_frame_count != custom_frame_count && current_planet != 0) {}
 
     return;
 }

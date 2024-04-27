@@ -1,6 +1,6 @@
-from agent import Agent
-from ratchet_environment import RatchetEnvironment
-from watchdog import Watchdog
+from Agent import Agent
+from RatchetEnvironment import RatchetEnvironment
+from Watchdog import Watchdog
 
 import numpy as np
 import wandb
