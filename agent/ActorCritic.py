@@ -71,6 +71,8 @@ class ActorCritic(nn.Module):
 
         action_logprobs = dist.log_prob(action)
         dist_entropy = dist.entropy()
+        dist_entropy = -torch.mean(dist_entropy)
+
         state_values = self.critic(state)
 
         return action_logprobs, state_values, dist_entropy, new_hidden_state, new_cell_state

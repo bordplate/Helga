@@ -5,7 +5,7 @@ from torch.distributions import Categorical
 import numpy as np
 
 from ActorCritic import ActorCritic
-from ReplayBuffer import ReplayBuffer
+from Buffer import Buffer
 
 device = torch.device('cpu')
 if torch.cuda.is_available():
@@ -22,7 +22,7 @@ class PPOAgent:
 
         self.device = device
 
-        self.batch_size = 256
+        self.batch_size = 64
 
         self.replay_buffers = []
 
@@ -33,23 +33,23 @@ class PPOAgent:
             {'params': self.policy.critic.parameters(), 'lr': lr_critic}
         ])
 
-        self.policy_old = ActorCritic(state_dim, action_dim, action_std_init).to(device)
-        self.policy_old.load_state_dict(self.policy.state_dict())
+        # self.policy_old = ActorCritic(state_dim, action_dim, action_std_init).to(device)
+        # self.policy_old.load_state_dict(self.policy.state_dict())
 
         self.mse_loss = nn.MSELoss()
 
     def start_new_episode(self):
         self.policy.reset_lstm_states()
-        self.policy_old.reset_lstm_states()
+        # self.policy_old.reset_lstm_states()
 
     def load_policy_dict(self, policy):
         self.policy.load_state_dict(policy)
-        self.policy_old.load_state_dict(policy)
+        # self.policy_old.load_state_dict(policy)
 
     def set_action_std(self, new_action_std):
         self.action_std = new_action_std
         self.policy.set_action_std(new_action_std)
-        self.policy_old.set_action_std(new_action_std)
+        # self.policy_old.set_action_std(new_action_std)
 
     def decay_action_std(self, action_std_decay_rate, min_action_std):
         self.action_std = self.action_std = self.action_std - action_std_decay_rate
@@ -65,80 +65,82 @@ class PPOAgent:
             obs = np.array([state])
             state_sequence = torch.tensor(obs, dtype=torch.float).to(device)
 
-            self.policy_old.eval()
+            self.policy.eval()
 
-            action, action_logprob, state_value = self.policy_old.act(state_sequence)
+            action, action_logprob, state_value = self.policy.act(state_sequence)
 
         return action.detach().cpu().flatten(), action, action_logprob, state_value
 
-    def learn(self, replay_buffer):
-        if replay_buffer.total < self.batch_size:
+    def learn(self, buffer: Buffer):
+        if buffer.total < self.batch_size:
             return 0
 
+        torch.autograd.set_detect_anomaly(True)
+
         self.policy.train()
-
-        total_samples = min(replay_buffer.total, 1500)
-
-        (states, actions, _rewards, dones, logprobs, state_values,
-         hidden_states, cell_states) = replay_buffer.sample(total_samples)
-
-        replay_buffer.clear()
-
-        # Monte Carlo estimate of returns
-        rewards = _rewards.clone().detach().to(device)
-        dones = dones.clone().detach().to(device)
-
-        # Initialize the next_value to 0.0 for the calculation of terminal states
-        next_value = 0.0
-
-        # We iterate backwards through rewards to accumulate return
-        for idx in reversed(range(len(rewards))):
-            if dones[idx]:
-                next_value = 0  # If done, there is no next state; we reset next_value
-            rewards[idx] = rewards[idx] + self.gamma * next_value
-            next_value = rewards[idx]  # Update next_value to the current reward
-
-        # Normalizing the rewards
-        rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)  # Prevent division by zero
-
-        hidden_states = hidden_states.detach()
-        cell_states = cell_states.detach()
-
-        losses = []
+        self.policy.actor.train()
+        self.policy.critic.train()
 
         self.optimizer.zero_grad()
 
+        losses = []
+
         # Optimize policy for K epochs
         for _ in range(self.K_epochs):
-            # If the replay buffer has already filled up, break out of the loop
-            # We'd rather train on new data than old data
-            if replay_buffer.total > 1500:
-                print("Breaking out of PPO training loop early to prioritize new data.")
-                break
+            for (states, actions, _rewards, dones, old_logprobs, old_state_values,
+                 hidden_states, cell_states) in buffer.get_batches(self.batch_size):
+                # Monte Carlo estimate of returns
+                rewards = []
+                dones = dones.clone().detach().to(device)
 
-            logprobs, state_values, dist_entropy, _, _ = (
-                self.policy.evaluate(states, actions, hidden_states, cell_states))
+                # Initialize the next_value to 0.0 for the calculation of terminal states
+                discounted_reward = 0
+                for reward, is_terminal in zip(reversed(_rewards), reversed(dones)):
+                    if is_terminal:
+                        discounted_reward = 0
+                    discounted_reward = reward + (self.gamma * discounted_reward)
 
-            # Finding the ratio (pi_theta / pi_theta__old)
-            ratios = torch.exp(logprobs - logprobs.detach())
+                    rewards.insert(0, discounted_reward)
 
-            adv = rewards - state_values.detach()
-            adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+                # Normalizing the rewards
+                rewards = torch.tensor(rewards, dtype=torch.float32).to(device)
+                rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)  # Prevent division by zero
 
-            # Surrogate loss
-            surr1 = ratios * adv
-            surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * adv
-            loss = -torch.min(surr1, surr2) + 0.5 * self.mse_loss(state_values.squeeze(), rewards) - 0.01 * dist_entropy
+                # hidden_states = hidden_states.detach()
+                # cell_states = cell_states.detach()
 
-            # Gradient step
-            self.optimizer.zero_grad()
-            loss.mean().backward()
-            torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 1.0)  # Gradient clipping
-            self.optimizer.step()
+                # Evaluating old actions and values
+                logprobs, state_values, dist_entropy, _, _ = self.policy.evaluate(states, actions, hidden_states, cell_states)
 
-            losses.append(loss.mean().item())
+                # Finding the ratio (pi_theta / pi_theta__old)
+                ratios = torch.exp(logprobs - old_logprobs.detach())
 
-        # Copy new weights into old policy
-        self.policy_old.load_state_dict(self.policy.state_dict())
+                # Finding Surrogate Loss
+                advantages = rewards - state_values.detach()
+                advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        return np.mean(losses)
+                surr1 = ratios * advantages
+                surr2 = torch.clamp(ratios, 1-self.eps_clip, 1+self.eps_clip) * advantages
+
+                actor_loss = -torch.min(surr1, surr2)
+                critic_loss = self.mse_loss(state_values.squeeze(), rewards)
+
+                loss = actor_loss + 0.5 * critic_loss - 0.01 * dist_entropy
+                # loss = actor_loss + 0.01 * dist_entropy + critic_loss
+
+                # Take gradient step
+                self.optimizer.zero_grad()
+                loss.mean().backward()
+
+                losses.append(loss.mean().item())
+
+        # for name, param in self.policy.named_parameters():
+        #     if param.grad is not None:
+        #         print(name, param.grad.norm().item())
+
+        self.optimizer.step()
+        self.optimizer.zero_grad()
+
+        buffer.clear_before_read_position()
+
+        return np.mean(losses) if len(losses) > 0 else 0

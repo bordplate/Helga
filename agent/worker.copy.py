@@ -1,7 +1,7 @@
 from Agent import Agent
 from Watchdog import Watchdog
 from RatchetEnvironment import RatchetEnvironment
-from ReplayBuffer import Transition, TransitionMessage
+from Buffer import Transition, TransitionMessage
 
 import pickle
 import numpy as np

@@ -1,7 +1,7 @@
 from Agent import Agent
 from Watchdog import Watchdog
 from RatchetEnvironment import RatchetEnvironment
-from ReplayBuffer import Transition, TransitionMessage
+from Buffer import Transition, TransitionMessage
 
 import pickle
 import numpy as np
@@ -44,26 +44,40 @@ def draw_bars(screen, actions, state_value):
         color = color_active if action > 0.5 else color_inactive
 
         if i < 4:
-            color = color_active if abs(action) > 0.1 else color_inactive
+            color = color_active if abs(action) > 0.2 else color_inactive
 
-        height = int((action + 1) / 2 * 180)  # Scale action value to height
+        height = int(abs(action) * 90)  # Scale action value to height
         bar_x = i * (bar_width + spacing) + 50
-        pygame.draw.rect(screen, color, pygame.Rect(bar_x, screen_height - 20 - height, bar_width, height))
+        bar_y = screen_height - 20 - height
+
+        if action < 0:
+            bar_y += height
+
+        pygame.draw.rect(screen, color, pygame.Rect(bar_x, bar_y - 90, bar_width, height))
+
+        # pygame.draw.rect(screen, color, pygame.Rect(bar_x, screen_height - 20 - height, bar_width, height))
 
         label = font.render(labels[i], True, (255, 255, 255))
         label_pos_x = bar_x + (bar_width - label.get_width()) // 2  # Calculate x position to center the label
         screen.blit(label, (label_pos_x, screen_height - 20))
 
     # Draw state_value bar and label, (state_value is between -1 and 1)
-    state_value = (state_value + 1) / 2
-    state_value = max(0, min(1, state_value))
-    height = int(state_value * 180)
+    _state_value = (state_value + 1) / 2
+    _state_value = max(0, min(1, _state_value))
+    height = int(abs(state_value) * 90)
     bar_x = 7 * (bar_width + spacing) + 50
+    bar_y = screen_height - 20 - height
 
-    # Make color gradient from green to red
-    col = (int(255 * (1 - state_value)), int(255 * state_value), 0)
+    if state_value < 0:
+        bar_y += height
 
-    pygame.draw.rect(screen, col, pygame.Rect(bar_x, screen_height - 20 - height, bar_width, height))
+        # Gradient red to white
+        col = (int(255 * _state_value), int(255 * (1 - _state_value)), int(255 * (1 - _state_value)))
+    else:
+        # Gradient green to white
+        col = (int(255 * (1 - _state_value)), int(255 * _state_value), int(255 * (1 - _state_value)))
+
+    pygame.draw.rect(screen, col, pygame.Rect(bar_x, bar_y - 90, bar_width, height))
 
     label = font.render("State Value", True, (255, 255, 255))
     label_pos_x = bar_x + (bar_width - label.get_width()) // 2
@@ -128,8 +142,6 @@ def start_worker():
     # agent = PPOAgent(gamma=0.99, epsilon=configuration["epsilon"], batch_size=0, n_actions=13, eps_end=configuration["min_epsilon"],
     #               input_dims=features, lr=0, sequence_length=8)
     agent = PPOAgent(features, 7, 0.00003, 0.0001, 0.99, 80, 0.2)
-    agent.policy.eval()
-    agent.policy_old.eval()
 
     last_model_fetch_time = 0
 
@@ -165,8 +177,10 @@ def start_worker():
         accumulated_reward = 0
         steps = 0
 
+        hidden_state, cell_state = None, None
+
         while True:
-            hidden_state, cell_state = agent.policy_old.hidden_state.detach(), agent.policy_old.cell_state.detach()
+            hidden_state, cell_state = agent.policy.hidden_state.detach(), agent.policy.cell_state.detach()
             #hidden_state, cell_state = None, None
 
             actions, _, logprob, state_value = agent.choose_action(state_sequence)
@@ -184,7 +198,7 @@ def start_worker():
             #     agent.decay_action_std(action_std_decay_rate, min_action_std)
 
             if epsilon_override is None:
-                transition = Transition(state_sequence, actions, reward, done, logprob, state_value,
+                transition = Transition(state_sequence, actions, reward * 10, done, logprob, state_value,
                                         hidden_state, cell_state)
                 message = TransitionMessage(transition, worker_id)
 
@@ -212,11 +226,12 @@ def start_worker():
 
             if steps % 5 == 0:
                 time_left = (30 * 30 - env.time_since_last_checkpoint) / 30
-                print(f"Score: %6.2f    death: %05.2f checkpoint: %d  closest_dist: %f         " % (
+                print(f"Score: %6.2f    death: %05.2f checkpoint: %d  closest_dist: %02.2f  value: %3.2f         " % (
                     accumulated_reward,
                     time_left,
                     env.n_checkpoints,
-                    env.closest_distance_to_checkpoint
+                    env.closest_distance_to_checkpoint,
+                    state_value.item() if state_value is not None else 0.0
                 ), end="\r")
 
                 model_timestamp = redis.get("rac1.fitness-course.model_timestamp")

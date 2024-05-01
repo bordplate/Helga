@@ -292,6 +292,12 @@ class RatchetEnvironment:
                 reward += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.8
 
                 self.frames_moving_away_from_checkpoint = 0
+        elif distance_from_checkpoint < pre_distance_from_checkpoint:
+            dist = pre_distance_from_checkpoint - distance_from_checkpoint
+            if dist < 2 and dist > 0.01:
+                self.reward_counters['rewards/distance_from_checkpoint_reward'] += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.1
+                reward += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.1
+
         # else:
         #     self.frames_moving_away_from_checkpoint += 1
         #

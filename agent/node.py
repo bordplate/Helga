@@ -1,5 +1,5 @@
 from PPOAgent import PPOAgent
-from ReplayBuffer import ReplayBuffer
+from Buffer import Buffer
 
 from redis import Redis, ConnectionPool
 from redis import from_url as redis_from_url
@@ -30,7 +30,8 @@ def listen_for_messages(redis: Redis, agent: PPOAgent):
         buffers[buffer.owner] = agent.replay_buffers
 
     # Start listening for messages
-    try:
+    # try:
+    if True:
         i = 0
         while True:
             i += 1
@@ -62,7 +63,7 @@ def listen_for_messages(redis: Redis, agent: PPOAgent):
                     if data.worker_name in buffers:
                         replay_buffer = buffers[data.worker_name]
                     else:
-                        buffers[data.worker_name] = ReplayBuffer(data.worker_name, 10000)
+                        buffers[data.worker_name] = Buffer(data.worker_name, 10000)
                         agent.replay_buffers.append(buffers[data.worker_name])
                         replay_buffer = buffers[data.worker_name]
 
@@ -76,8 +77,8 @@ def listen_for_messages(redis: Redis, agent: PPOAgent):
                         transition.hidden_state,
                         transition.cell_state,
                     )
-    except Exception as e:
-        print(e)
+    # except Exception as e:
+    #     print(e)
 
     # Restart ourselves if we get here
     print("Restarting listener...")
@@ -134,7 +135,7 @@ def start():
     # agent = Agent(gamma=0.99, epsilon=1.0, batch_size=batch_size, n_actions=13, eps_end=0.05,
     #               input_dims=features, lr=learning_rate, sequence_length=sequence_length)
 
-    agent = PPOAgent(features, 7, 1e-4, 5e-4, 0.99, 15, 0.2)
+    agent = PPOAgent(features, 7, 1e-2, 1e-2, 0.99, 5, 0.2)
 
     # Load existing model if load_model is set
     if args.model:
@@ -204,8 +205,9 @@ def start():
         print("\rProcessed samples: ", n_processed, end="")
 
         for replay_buffer in agent.replay_buffers:
-            if replay_buffer.total >= 1500:
+            if replay_buffer.total >= 128 * 1:
                 n_processed += replay_buffer.total
+                replay_buffer.lock_read_position()
                 loss = agent.learn(replay_buffer)
                 losses.append(loss)
                 processed = True

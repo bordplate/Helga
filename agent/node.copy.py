@@ -1,5 +1,5 @@
 from Agent import Agent
-from ReplayBuffer import PrioritizedReplayBuffer
+from Buffer import PrioritizedReplayBuffer
 
 from redis import Redis, ConnectionPool
 from redis import from_url as redis_from_url

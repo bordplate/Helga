@@ -1,7 +1,7 @@
 import torch as T
 import numpy as np
 
-from ReplayBuffer import ReplayBuffer
+from PrioritizedReplayBuffer import PrioritizedReplayBuffer
 from Network import DeepQNetwork
 
 
