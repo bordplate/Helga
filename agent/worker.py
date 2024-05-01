@@ -11,6 +11,8 @@ from redis import from_url as redis_from_url
 
 from PPOAgent import PPOAgent
 
+import pygame
+
 
 features = 15 + 128
 sequence_length = 8
@@ -20,6 +22,54 @@ configuration = {
     "epsilon": 0.005,
     "min_epsilon": 0.005,
 }
+
+# Pygame setup
+screen_width, screen_height = 1000, 200
+
+bar_width = 80
+spacing = 20
+
+color_active = (0, 255, 0)
+color_inactive = (255, 0, 0)
+
+# colors = [(0, 255, 0), (0, 0, 255), (255, 0, 0), (255, 255, 0), (0, 255, 255), (255, 0, 255), (75, 0, 130)]
+labels = ["RJoyX", "RJoyY", "LJoyX", "LJoyY", "R1", "Cross", "Square"]
+# font = pygame.font.Font(None, 24)
+global font
+
+
+def draw_bars(screen, actions, state_value):
+    screen.fill((0, 0, 0))
+    for i, action in enumerate(actions):
+        color = color_active if action > 0.5 else color_inactive
+
+        if i < 4:
+            color = color_active if abs(action) > 0.1 else color_inactive
+
+        height = int((action + 1) / 2 * 180)  # Scale action value to height
+        bar_x = i * (bar_width + spacing) + 50
+        pygame.draw.rect(screen, color, pygame.Rect(bar_x, screen_height - 20 - height, bar_width, height))
+
+        label = font.render(labels[i], True, (255, 255, 255))
+        label_pos_x = bar_x + (bar_width - label.get_width()) // 2  # Calculate x position to center the label
+        screen.blit(label, (label_pos_x, screen_height - 20))
+
+    # Draw state_value bar and label, (state_value is between -1 and 1)
+    state_value = (state_value + 1) / 2
+    state_value = max(0, min(1, state_value))
+    height = int(state_value * 180)
+    bar_x = 7 * (bar_width + spacing) + 50
+
+    # Make color gradient from green to red
+    col = (int(255 * (1 - state_value)), int(255 * state_value), 0)
+
+    pygame.draw.rect(screen, col, pygame.Rect(bar_x, screen_height - 20 - height, bar_width, height))
+
+    label = font.render("State Value", True, (255, 255, 255))
+    label_pos_x = bar_x + (bar_width - label.get_width()) // 2
+    screen.blit(label, (label_pos_x, screen_height - 20))
+
+    pygame.display.flip()
 
 
 def update_configuration(redis: Redis):
@@ -63,6 +113,13 @@ def start_worker():
     if epsilon_override is None:
         update_configuration(redis)
     else:
+        # Pygame initialization for visualization
+        pygame.init()
+        screen_width, screen_height = 1000, 200
+        screen = pygame.display.set_mode((screen_width, screen_height))
+        pygame.display.set_caption("Action Visualization")
+        globals()["font"] = pygame.font.Font(None, 24)
+
         print("Running with epsilon override:", epsilon_override)
         configuration["action_std"] = float(epsilon_override)
         configuration["min_action_std"] = float(epsilon_override)
@@ -134,6 +191,18 @@ def start_worker():
                 # Pickle the transition and publish it to the "replay_buffer" channel
                 data = pickle.dumps(message)
                 redis.publish("rac1.fitness-course.replay_buffer", data)
+            else:
+                # Visualize the actions
+                draw_bars(screen, actions, state_value)
+
+                # Pygame event handling
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        pygame.quit()
+                        return
+
+                if done:
+                    break
 
             state_sequence = new_state_sequence
 
