@@ -106,12 +106,12 @@ class Actor(nn.Module):
         self.lstm = nn.LSTM(self.hidden_dims, self.hidden_dims, self.num_layers, batch_first=True)
 
         self.fc1 = nn.Linear(self.hidden_dims, self.hidden_dims)
-        self.bn1 = nn.BatchNorm1d(self.hidden_dims)
+        # self.bn1 = nn.BatchNorm1d(self.hidden_dims)
         self.fc2 = nn.Linear(self.hidden_dims, self.hidden_dims)
-        self.bn2 = nn.BatchNorm1d(self.hidden_dims)
+        # self.bn2 = nn.BatchNorm1d(self.hidden_dims)
 
         self.fc3 = nn.Linear(self.hidden_dims, self.hidden_dims)
-        self.bn3 = nn.BatchNorm1d(self.hidden_dims)
+        # self.bn3 = nn.BatchNorm1d(self.hidden_dims)
 
         self.fc4 = nn.Linear(self.hidden_dims, self.action_dim)
 
@@ -154,13 +154,13 @@ class Actor(nn.Module):
         out, (hidden_state, cell_state) = self.lstm(x, (hidden_state, cell_state))
 
         x = F.leaky_relu(self.fc1(out[:, -1, :]), 0.01)
-        x = self.bn1(x)
+        # x = self.bn1(x)
 
         x = F.leaky_relu(self.fc2(x), 0.01)
-        x = self.bn2(x)
+        # x = self.bn2(x)
 
         x = F.leaky_relu(self.fc3(x), 0.01)
-        x = self.bn3(x)
+        # x = self.bn3(x)
 
         x = torch.tanh(self.fc4(x))
 

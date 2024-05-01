@@ -126,7 +126,7 @@ def start_worker():
             # if total_steps > 0 and total_steps % action_std_decay_freq == 0:
             #     agent.decay_action_std(action_std_decay_rate, min_action_std)
 
-            if epsilon_override is not None:
+            if epsilon_override is None:
                 transition = Transition(state_sequence, actions, reward, done, logprob, state_value,
                                         hidden_state, cell_state)
                 message = TransitionMessage(transition, worker_id)
