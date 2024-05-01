@@ -150,9 +150,25 @@ def start_worker():
                     env.closest_distance_to_checkpoint
                 ), end="\r")
 
+                model_timestamp = redis.get("rac1.fitness-course.model_timestamp")
+                if model_timestamp is not None and float(model_timestamp) > last_model_fetch_time:
+                    # Load the latest model from Redis
+                    configuration["model"] = redis.get("rac1.fitness-course.model")
+                    if configuration["model"] is not None:
+                        agent.load_policy_dict(pickle.loads(configuration["model"]))
+                        last_model_fetch_time = float(redis.get("rac1.fitness-course.model_timestamp"))
+
+                if epsilon_override is None:
+                    update_configuration(redis)
+                    agent.set_action_std(configuration["action_std"])
+                    agent.eps_min = configuration["min_epsilon"]
+                else:
+                    agent.set_action_std(float(epsilon_override))
+                    agent.eps_min = float(epsilon_override)
+
                 # When time left is less than 5 seconds, we increase epsilon as a last ditch effort to explore
-                if epsilon_override is None and time_left < 5:
-                    agent.epsilon = 0.25
+                # if epsilon_override is None and time_left < 5:
+                #     agent.epsilon = 0.25
                 # elif agent.epsilon == 0.25 and time_left > 5:  # Reset epsilon to normal if agent hit checkpoint and gained more time
                 #     agent.epsilon = configuration["epsilon"]
 
