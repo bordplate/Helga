@@ -179,6 +179,7 @@ void unlock_level(int level) {
 
 #define remote_pressed_buttons *((int*)0xB00008)
 #define last_remote_pressed_buttons *((int*)0xB0000C)
+#define remote_joysticks *((int*)0xB00010)
 
 SHK_HOOK(int32_t, cellPadGetDataRedirect, uint32_t, CellPadData*);
 int32_t cellPadGetDataRedirectHook(uint32_t port_no, CellPadData *data) {
@@ -202,10 +203,10 @@ int32_t cellPadGetDataRedirectHook(uint32_t port_no, CellPadData *data) {
 
         data->button[2] |= (remote_pressed_buttons & 0xff00) >> 8;
         data->button[3] |= remote_pressed_buttons & 0x00ff;
-        data->button[4] = 0x7f;
-        data->button[5] = 0x7f;
-        data->button[6] = 0x7f;
-        data->button[7] = 0x7f;
+        data->button[4] = (remote_joysticks & 0x000000ff);
+        data->button[5] = (remote_joysticks & 0x0000ff00) >> 8;
+        data->button[6] = (remote_joysticks & 0x00ff0000) >> 16;
+        data->button[7] = (remote_joysticks & 0xff000000) >> 24;
     }
 
     last_remote_pressed_buttons = remote_pressed_buttons;

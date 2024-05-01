@@ -122,6 +122,10 @@ void Game::on_tick() {
         //*(int*)0x969c70 = (int)5;
     }
 
+    user_option_camera_rotation_speed = 2;
+    user_option_camera_up_down_movement = 0;
+    user_option_camera_left_right_movement = 0;
+
 //    if (hoverboard_lady_address == 0) {
 //        hoverboard_lady_address = (uint32_t)Moby::find_first(918);
 //    } else {
@@ -190,17 +194,17 @@ void Game::on_tick() {
         // Raycast in a grid pattern extending from the player with the given fov
         // We also oscillate the rays to the left and right to get a wider field of view
 
-        if (oscillation_direction) {
-            oscillation_offset += 1.0f;
-        } else {
-            oscillation_offset -= 1.0f;
-        }
-
-        if (oscillation_offset > 10.0f) {
-            oscillation_direction = false;
-        } else if (oscillation_offset < -10.0f) {
-            oscillation_direction = true;
-        }
+//        if (oscillation_direction) {
+//            oscillation_offset += 1.0f;
+//        } else {
+//            oscillation_offset -= 1.0f;
+//        }
+//
+//        if (oscillation_offset > 10.0f) {
+//            oscillation_direction = false;
+//        } else if (oscillation_offset < -10.0f) {
+//            oscillation_direction = true;
+//        }
 
         if (death_count != last_death_count) {
             for (int i = 0; i < 64; i++) {
@@ -459,7 +463,7 @@ void Game::on_tick() {
 }
 
 void Game::before_player_spawn() {
-
+    death_count += 1;
 }
 
 void Game::on_render() {

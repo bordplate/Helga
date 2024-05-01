@@ -26,7 +26,7 @@ class RatchetEnvironment:
         # [x, y] bounds of the level
         self.bounds = [
             [91, 234],
-            [260, 40],
+            [275, 40],
         ]
 
         self.checkpoints = []
@@ -124,7 +124,7 @@ class RatchetEnvironment:
         self.game.set_item_unlocked(2)
 
         # Clear game inputs so we don't keep moving from the last episode
-        self.game.set_controller_input(0)
+        self.game.set_controller_input(0, 0.0, 0.0, 0.0, 0.0)
 
         # while self.game.get_player_state() != 107:
         #     self.game.start_hoverboard_race()
@@ -134,9 +134,9 @@ class RatchetEnvironment:
         self.distance_from_checkpoint_per_step = []
 
         # Step once to get the first observation
-        return self.step(0)
+        return self.step([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
 
-    def step(self, action):
+    def step(self, actions):
         state, reward, terminal = None, 0.0, False
 
         self.timer += 1
@@ -147,36 +147,69 @@ class RatchetEnvironment:
         #     reward -= 1.0
         #     print("Timeout!")
 
-        actions_mapping = [
-            0x0,     # No action
-            0x8,     # R1
-            0x40,    # Cross
-            0x80,    # Square
-            0x1000,  # Up
-            0x2000,  # Right
-            0x4000,  # Down
-            0x8000,  # Left
+        # actions_mapping = [
+        #     0x0,     # No action
+        #     0x8,     # R1
+        #     0x40,    # Cross
+        #     0x80,    # Square
+        #     0x1000,  # Up
+        #     0x2000,  # Right
+        #     0x4000,  # Down
+        #     0x8000,  # Left
+        #
+        #     0x8 | 0x40,  # R1 + Cross
+        #
+        #     0x40 | 0x1000,  # Cross + Up
+        #     0x40 | 0x2000,  # Cross + Right
+        #     0x40 | 0x4000,  # Cross + Down
+        #     0x40 | 0x8000,  # Cross + Left
+        # ]
 
-            0x8 | 0x40,  # R1 + Cross
+        action = 0
 
-            0x40 | 0x1000,  # Cross + Up
-            0x40 | 0x2000,  # Cross + Right
-            0x40 | 0x4000,  # Cross + Down
-            0x40 | 0x8000,  # Cross + Left
-        ]
+        left_joy_x = 0.0
+        left_joy_y = 0.0
+        right_joy_y = 0.0
+        right_joy_x = 0.0
+
+        if actions[0] > 0.1 or actions[0] < -0.1:
+            right_joy_x = actions[0]
+        if actions[1] > 0.1 or actions[1] < -0.1:
+            right_joy_y = actions[1]
+        if actions[2] > 0.1 or actions[2] < -0.1:
+            left_joy_x = actions[2]
+        if actions[3] > 0.1 or actions[3] < -0.1:
+            left_joy_y = actions[3]
+
+        # if actions[0] > 0.5:
+        #     action |= 0x1000  # Up
+        # if actions[1] > 0.5:
+        #     action |= 0x2000  # Right
+        # if actions[2] > 0.5:
+        #     action |= 0x4000  # Down
+        # if actions[3] > 0.5:
+        #     action |= 0x8000  # Left
+        if actions[4] > 0.5:
+            action |= 0x8   # R1
+        if actions[5] > 0.5:
+            action |= 0x40  # Cross
+        if actions[6] > 0.5:
+            action |= 0x80  # Square
+
+        death_count = self.game.get_death_count()
 
         # Discourage excessive jumping because it's annoying
-        if self.jump_debounce > 0:
-            self.jump_debounce -= 1
-
-        if action == 3:
-            if self.jump_debounce > 0:
-                self.reward_counters['rewards/jump_penalty'] += self.jump_debounce * 0.00001
-                reward -= self.jump_debounce * 0.00001
-            self.jump_debounce += 5
+        # if self.jump_debounce > 0:
+        #     self.jump_debounce -= 1
+        #
+        # if action & 0x40:
+        #     if self.jump_debounce > 0:
+        #         self.reward_counters['rewards/jump_penalty'] += self.jump_debounce * 0.00001
+        #         reward -= self.jump_debounce * 0.00001
+        #     self.jump_debounce += 5
 
         # Communicate game inputs with game
-        self.game.set_controller_input(actions_mapping[action])
+        self.game.set_controller_input(action, left_joy_x, left_joy_y, right_joy_x, right_joy_y)
 
         # Get current player position and distance to checkpoint before advancing to next frame so we can calculate
         #   how much the agent has moved towards the goal given the input it provided.
@@ -202,6 +235,12 @@ class RatchetEnvironment:
             reward -= 1.0
             self.reward_counters['rewards/crash_penalty'] += 1
             terminal = True
+
+        if death_count != self.game.get_death_count():
+            terminal = True
+            self.reward_counters['rewards/death_penalty'] += 1.0
+            reward -= 1.0
+            print("Lmao he died")
 
         # Get updated player info
         position = self.game.get_player_position()
@@ -236,24 +275,29 @@ class RatchetEnvironment:
             self.reward_counters['rewards/void_penalty'] += 1
             reward -= 1.0
 
+        if distance_from_checkpoint < pre_distance_from_checkpoint:
+            self.frames_moving_away_from_checkpoint -= 2
+
         # We want to discourage the agent from moving away from the checkpoint, but we don't want to penalize it
         #  too much for doing so because it's not always possible to move directly towards the checkpoint.
         if self.frames_moving_away_from_checkpoint < 0:
             self.frames_moving_away_from_checkpoint = 0
-        elif self.frames_moving_away_from_checkpoint > 20:
-            self.frames_moving_away_from_checkpoint = 20
+        elif self.frames_moving_away_from_checkpoint > 2000:
+            self.frames_moving_away_from_checkpoint = 2000
 
         if distance_from_checkpoint < pre_distance_from_checkpoint and distance_from_checkpoint < self.closest_distance_to_checkpoint:
             dist = pre_distance_from_checkpoint - distance_from_checkpoint
             if dist < 2 and dist > 0.01:
-                self.reward_counters['rewards/distance_from_checkpoint_reward'] += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.5
-                reward += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.5
-                self.frames_moving_away_from_checkpoint -= 0
+                self.reward_counters['rewards/distance_from_checkpoint_reward'] += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.8
+                reward += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.8
+
+                self.frames_moving_away_from_checkpoint = 0
         else:
             self.frames_moving_away_from_checkpoint += 1
 
-            self.reward_counters['rewards/distance_from_checkpoint_penalty'] += 0.001 + (self.frames_moving_away_from_checkpoint * 0.001)
-            reward -= 0.001 + (self.frames_moving_away_from_checkpoint * 0.001)
+            if self.frames_moving_away_from_checkpoint > 30:
+                self.reward_counters['rewards/distance_from_checkpoint_penalty'] += (self.frames_moving_away_from_checkpoint * 0.00020)
+                reward -= (self.frames_moving_away_from_checkpoint * 0.00020)
 
         if distance_from_checkpoint < self.closest_distance_to_checkpoint:
             self.closest_distance_to_checkpoint = distance_from_checkpoint
@@ -284,10 +328,10 @@ class RatchetEnvironment:
             self.reward_counters['rewards/timeout_penalty'] += 1
             reward -= 1.0
 
-        # Discourage standing still
-        if speed <= 0.01 and self.timer > 30 * 5:
-            self.reward_counters['rewards/stall_penalty'] += 0.05
-            reward -= 0.05
+        # # Discourage standing still
+        # if speed <= 0.01 and self.timer > 30 * 5:
+        #     self.reward_counters['rewards/stall_penalty'] += 0.05
+        #     reward -= 0.05
 
         # Check that agent is facing a checkpoint by calculating angle between player and checkpoint
         angle = np.arctan2(checkpoint_position.y - position.y, checkpoint_position.x - position.x) - player_rotation.z

@@ -1,5 +1,5 @@
-from Agent import Agent
-from ReplayBuffer import PrioritizedReplayBuffer
+from PPOAgent import PPOAgent
+from ReplayBuffer import ReplayBuffer
 
 from redis import Redis, ConnectionPool
 from redis import from_url as redis_from_url
@@ -19,10 +19,15 @@ from threading import Thread, Lock
 from learn import update_graph_html
 
 
-def listen_for_messages(redis: Redis, replay_buffer: PrioritizedReplayBuffer):
+def listen_for_messages(redis: Redis, agent: PPOAgent):
     # Subscribe to the "replay_buffer" channel
     pubsub = redis.pubsub()
     pubsub.subscribe("rac1.fitness-course.replay_buffer")
+
+    buffers = {}
+
+    for buffer in agent.replay_buffers:
+        buffers[buffer.owner] = agent.replay_buffers
 
     # Start listening for messages
     try:
@@ -54,43 +59,50 @@ def listen_for_messages(redis: Redis, replay_buffer: PrioritizedReplayBuffer):
                     data = pickle.loads(data)
                     transition = data.transition
 
+                    if data.worker_name in buffers:
+                        replay_buffer = buffers[data.worker_name]
+                    else:
+                        buffers[data.worker_name] = ReplayBuffer(data.worker_name, 10000)
+                        agent.replay_buffers.append(buffers[data.worker_name])
+                        replay_buffer = buffers[data.worker_name]
+
                     replay_buffer.add(
                         transition.state,
                         transition.action,
                         transition.reward,
-                        transition.next_state,
                         transition.done,
+                        transition.logprob,
+                        transition.state_value,
                         transition.hidden_state,
                         transition.cell_state,
                     )
-
     except Exception as e:
         print(e)
 
     # Restart ourselves if we get here
     print("Restarting listener...")
-    listen_for_messages(redis, replay_buffer)
+    listen_for_messages(redis, agent)
 
 
-def save_model(agent: Agent, model_path: str):
+def save_model(agent: PPOAgent, model_path: str):
     torch.save({
-        'model_state_dict': agent.Q_eval.state_dict(),
-        'optimizer_state_dict': agent.Q_eval.optimizer.state_dict(),
-        'epsilon': agent.epsilon,
+        'model_state_dict': agent.policy.state_dict(),
+        'optimizer_state_dict': agent.optimizer.state_dict(),
+        'action_std': agent.action_std,
     }, model_path)
 
 
-def load_model(agent: Agent, model_path: str):
+def load_model(agent: PPOAgent, model_path: str):
     if os.path.exists(model_path):
         print(f"Loading model from {model_path}")
         checkpoint = torch.load(model_path)
-        agent.Q_eval.load_state_dict(checkpoint['model_state_dict'])
-        agent.Q_eval.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        agent.epsilon = checkpoint['epsilon']
+        agent.load_policy_dict(checkpoint['model_state_dict'])
+        agent.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        agent.action_std = checkpoint['action_std']
 
-        agent.Q_eval = agent.Q_eval.to(agent.Q_eval.device)
+        agent.policy = agent.policy.to(agent.device)
 
-        agent.Q_eval.train()
+        agent.policy.train()
     else:
         print(f"Model file {model_path} not found.")
         exit(0)
@@ -102,8 +114,8 @@ def start():
     args.add_argument("--redis-host", type=str, default="localhost")
     args.add_argument("--redis-port", type=int, default=6379)
     args.add_argument("--model", type=str, default=None)
-    args.add_argument("--wandb", type=bool, default=False if "pydevd" in sys.modules else True)
-    args.add_argument("--commit", type=bool, default=False if "pydevd" in sys.modules else True)
+    args.add_argument("--wandb", type=bool, action=argparse.BooleanOptionalAction, default=False if "pydevd" in sys.modules else True)
+    args.add_argument("--commit", type=bool, action=argparse.BooleanOptionalAction, default=False if "pydevd" in sys.modules else True)
     args = args.parse_args()
 
     commit = args.commit
@@ -119,33 +131,30 @@ def start():
     redis = redis_from_url(f"redis://{args.redis_host}:{args.redis_port}")
 
     # Create an agent
-    agent = Agent(gamma=0.99, epsilon=1.0, batch_size=batch_size, n_actions=13, eps_end=0.05,
-                  input_dims=features, lr=learning_rate, sequence_length=sequence_length)
+    # agent = Agent(gamma=0.99, epsilon=1.0, batch_size=batch_size, n_actions=13, eps_end=0.05,
+    #               input_dims=features, lr=learning_rate, sequence_length=sequence_length)
+
+    agent = PPOAgent(features, 7, 5e-6, 1e-5, 0.99, 10, 0.2)
 
     # Load existing model if load_model is set
     if args.model:
         load_model(agent, args.model)
-        agent.update_target_network()
         print("Loaded model from file")
 
         # Set Redis model
-        model = pickle.dumps(agent.Q_eval.state_dict())
+        model = pickle.dumps(agent.policy.state_dict())
         redis.set("rac1.fitness-course.model", model)
         redis.set("rac1.fitness-course.model_timestamp", time.time())
 
     existing_model = redis.get("rac1.fitness-course.model") if args.model is None else None
     if existing_model is not None:
-        agent.epsilon = float(redis.get("rac1.fitness-course.epsilon"))
-        agent.Q_eval.load_state_dict(pickle.loads(existing_model))
+        agent.action_std = float(redis.get("rac1.fitness-course.action_std"))
+        agent.load_policy_dict(pickle.loads(existing_model))
 
         # Load optimizer if it exists
         existing_optimizer = redis.get("rac1.fitness-course.optimizer")
         if existing_optimizer is not None:
-            agent.Q_eval.optimizer.load_state_dict(pickle.loads(existing_optimizer))
-
-        agent.update_target_network()
-
-        agent.Q_eval.train()
+            agent.optimizer.load_state_dict(pickle.loads(existing_optimizer))
 
         print("Loaded existing model from Redis")
 
@@ -168,7 +177,7 @@ def start():
         update_graph_html(wandb.run.get_url())
 
     # Start listening for messages on a separate thread
-    thread = Thread(target=listen_for_messages, args=(redis, agent.replay_buffer))
+    thread = Thread(target=listen_for_messages, args=(redis, agent))
     thread.daemon = True
     thread.start()
 
@@ -181,44 +190,57 @@ def start():
     last_samples = 0
     samples_history = []
 
+    action_std = 0.6  # starting std for action distribution (Multivariate Normal)
+    action_std_decay_rate = 0.025  # linearly decay action_std (action_std = action_std - action_std_decay_rate)
+    min_action_std = 0.04  # minimum action_std (stop decay after action_std <= min_action_std)
+    action_std_decay_freq = int(4000)  # action_std decay frequency (in num timesteps)
+
+    print("Starting training loop...")
+    n_processed = 0
+
     while True:
-        if agent.replay_buffer.total <= 10000:
+        processed = False
+
+        print("\rProcessed samples: ", n_processed, end="")
+
+        for replay_buffer in agent.replay_buffers:
+            if replay_buffer.total >= 1500:
+                n_processed += replay_buffer.total
+                loss = agent.learn(replay_buffer)
+                losses.append(loss)
+                processed = True
+
+                print("\rProcessed samples: ", n_processed, end="")
+
+        if not processed:
             time.sleep(0.1)
             continue
 
-        #if agent.replay_buffer.new_samples > train_frequency:
-        last_samples += agent.replay_buffer.new_samples
-
-        loss = agent.learn()
-
-        losses.append(loss)
+        steps += 1
 
         # Calculate samples per second
-        if time.time() - last_time > 1:
-            samples_per_second = last_samples / (time.time() - last_time)
-            last_time = time.time()
-            last_samples = 0
+        # if time.time() - last_time > 1:
+        #     samples_per_second = last_samples / (time.time() - last_time)
+        #     last_time = time.time()
+        #     last_samples = 0
+        #
+        #     samples_history.append(samples_per_second)
+        #     samples_history = samples_history[-10:]
 
-            samples_history.append(samples_per_second)
-            samples_history = samples_history[-10:]
+        if commit:
+            model = pickle.dumps(agent.policy.state_dict())
+            optimizer = pickle.dumps(agent.optimizer.state_dict())
 
-        # Update target network used for calculating the target Q values
-        if steps % target_update_frequency == 0:
-            agent.update_target_network()
+            redis.set("rac1.fitness-course.model", model)
+            redis.set("rac1.fitness-course.optimizer", optimizer)
+            redis.set("rac1.fitness-course.model_timestamp", time.time())
 
-        if steps % 20 == 0:
-            if commit:
-                model = pickle.dumps(agent.Q_eval.state_dict())
-                optimizer = pickle.dumps(agent.Q_eval.optimizer.state_dict())
-
-                redis.set("rac1.fitness-course.model", model)
-                redis.set("rac1.fitness-course.optimizer", optimizer)
-                redis.set("rac1.fitness-course.model_timestamp", time.time())
-
-                redis.set("rac1.fitness-course.epsilon", agent.epsilon)
+            redis.set("rac1.fitness-course.action_std", agent.action_std)
 
         # Updating model in Redis, log stuff for debub, make backups
-        if steps % 200 == 0:
+        if steps % 5 == 0:
+            agent.decay_action_std(action_std_decay_rate, min_action_std)
+
             # Get the last 100 scores from Redis key "avg_scores" and cast them to floats
             scores = redis.lrange("rac1.fitness-course.avg_scores", -100, -1)
             scores = [float(score) for score in scores]
@@ -227,8 +249,8 @@ def start():
             checkpoints = [float(checkpoint) for checkpoint in checkpoints]
 
             if len(losses) > 0:
-                print('avg loss: %.2f' % np.mean(losses[-100:]), 'avg_score: %.2f' % np.mean(scores),
-                      'epsilon: %.2f' % agent.epsilon, 'samples/sec: %.2f' % np.mean(samples_history))
+                print('\rstep:', steps, 'avg loss: %.2f' % np.mean(losses[-100:]), 'avg_score: %.2f' % np.mean(scores),
+                      'epsilon: %.2f' % agent.action_std) # , 'samples/sec: %.2f' % np.mean(samples_history))
 
             # Save the model every 10000 steps
             if commit and steps % 10000 == 0:
@@ -239,14 +261,10 @@ def start():
                 wandb.log({
                     "avg_score": np.mean(scores),
                     "loss": np.mean(losses[-100:]),
-                    "epsilon": agent.epsilon,
-                    "samples_per_second": np.mean(samples_history),
+                    "epsilon": agent.action_std,
+                    # "samples_per_second": np.mean(samples_history),
                     "avg_checkpoints": np.mean(checkpoints),
                 })
-
-        steps += 1
-
-        time.sleep(0.001)
 
 
 if __name__ == "__main__":

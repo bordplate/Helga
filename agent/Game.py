@@ -123,6 +123,7 @@ class Game:
     frame_count_address = 0xB00000
     frame_progress_address = 0xB00004
     input_address = 0xB00008
+    joystick_address = 0xB00010
     hoverboard_lady_ptr_address = 0xB00020
     skid_ptr_address = 0xB00024
 
@@ -152,6 +153,8 @@ class Game:
     coll_class_left_address = 0xB00048
     coll_class_right_address = 0xB0004c
 
+    death_count_address = 0xB00500
+
     def __init__(self, process_name="rpcs3.exe"):
         self.process_name = process_name
 
@@ -172,8 +175,17 @@ class Game:
         self.open_process()
         self.must_restart = False
 
-    def set_controller_input(self, controller_input):
+    def set_controller_input(self, controller_input, left_joy_x, left_joy_y, right_joy_x, right_joy_y):
         self.process.write_int(self.input_address, controller_input)
+
+        joystick = 0
+
+        joystick = joystick | (int((left_joy_x+1) * 127) & 0xFF)
+        joystick = joystick | ((int((left_joy_y+1) * 127) & 0xFF) << 8)
+        joystick = joystick | ((int((right_joy_x+1) * 127) & 0xFF) << 16)
+        joystick = joystick | ((int((right_joy_y+1) * 127) & 0xFF) << 24)
+
+        self.process.write_int(self.joystick_address, joystick)
 
     def set_item_unlocked(self, item_id):
         self.process.write_byte(self.items_address + item_id, 1)
@@ -332,6 +344,9 @@ class Game:
         return (coll_forward, coll_up, coll_down, coll_left, coll_right,
                 coll_class_forward, coll_class_up, coll_class_down, coll_class_left, coll_class_right)
 
+    def get_death_count(self):
+        return self.process.read_int(self.death_count_address)
+
     def start_hoverboard_race(self):
         """
         To start the hoverboard race, we have to find a specific NPC in the game and set two of its properties to 3.
@@ -357,4 +372,3 @@ class Game:
         self.process.write_int(self.frame_progress_address, frame_count)
 
         return True
-

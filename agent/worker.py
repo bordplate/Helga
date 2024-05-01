@@ -9,6 +9,8 @@ import numpy as np
 from redis import Redis
 from redis import from_url as redis_from_url
 
+from PPOAgent import PPOAgent
+
 
 features = 15 + 128
 sequence_length = 8
@@ -21,7 +23,7 @@ configuration = {
 
 
 def update_configuration(redis: Redis):
-    configuration["epsilon"] = float(redis.get("rac1.fitness-course.epsilon")) if redis.get("rac1.fitness-course.epsilon") is not None else 1.0
+    configuration["action_std"] = float(redis.get("rac1.fitness-course.action_std")) if redis.get("rac1.fitness-course.action_std") is not None else 1.0
     configuration["min_epsilon"] = float(redis.get("rac1.fitness-course.min_epsilon")) if redis.get("rac1.fitness-course.min_epsilon") is not None else 0.005
 
 
@@ -62,18 +64,22 @@ def start_worker():
         update_configuration(redis)
     else:
         print("Running with epsilon override:", epsilon_override)
-        configuration["epsilon"] = float(epsilon_override)
-        configuration["min_epsilon"] = float(epsilon_override)
+        configuration["action_std"] = float(epsilon_override)
+        configuration["min_action_std"] = float(epsilon_override)
 
     # Agent that we will use only for inference
-    agent = Agent(gamma=0.99, epsilon=configuration["epsilon"], batch_size=0, n_actions=13, eps_end=configuration["min_epsilon"],
-                  input_dims=features, lr=0, sequence_length=8)
+    # agent = PPOAgent(gamma=0.99, epsilon=configuration["epsilon"], batch_size=0, n_actions=13, eps_end=configuration["min_epsilon"],
+    #               input_dims=features, lr=0, sequence_length=8)
+    agent = PPOAgent(features, 7, 0.00003, 0.0001, 0.99, 80, 0.2)
+    agent.policy.eval()
+    agent.policy_old.eval()
 
     last_model_fetch_time = 0
 
     total_steps = 0
     episodes = 0
     scores = []
+    losses = []
 
     # Start stepping through the environment
     while True:
@@ -82,13 +88,16 @@ def start_worker():
             # Load the latest model from Redis
             configuration["model"] = redis.get("rac1.fitness-course.model")
             if configuration["model"] is not None:
-                agent.Q_eval.load_state_dict(pickle.loads(configuration["model"]))
+                agent.load_policy_dict(pickle.loads(configuration["model"]))
                 last_model_fetch_time = float(redis.get("rac1.fitness-course.model_timestamp"))
 
         if epsilon_override is None:
             update_configuration(redis)
-            agent.epsilon = configuration["epsilon"]
+            agent.set_action_std(configuration["action_std"])
             agent.eps_min = configuration["min_epsilon"]
+        else:
+            agent.set_action_std(float(epsilon_override))
+            agent.eps_min = float(epsilon_override)
 
         agent.start_new_episode()
         state, _, _ = env.reset()
@@ -98,18 +107,33 @@ def start_worker():
 
         accumulated_reward = 0
         steps = 0
+
         while True:
-            action = agent.choose_action(state_sequence)
-            state, reward, done = env.step(action)
+            hidden_state, cell_state = agent.policy_old.hidden_state.detach(), agent.policy_old.cell_state.detach()
+            #hidden_state, cell_state = None, None
+
+            actions, _, logprob, state_value = agent.choose_action(state_sequence)
+            state, reward, done = env.step(actions)
 
             new_state_sequence = np.concatenate((state_sequence[1:], [state]))
 
-            transition = Transition(state_sequence, action, reward, new_state_sequence, done, agent.hidden_state, agent.cell_state)
-            message = TransitionMessage(transition, worker_id)
+            # agent.replay_buffer.add(state_sequence, actions, reward, new_state_sequence, done, logprob, state_value, None, None)
 
-            # Pickle the transition and publish it to the "replay_buffer" channel
-            data = pickle.dumps(message)
-            redis.publish("rac1.fitness-course.replay_buffer", data)
+            # if total_steps > 0 and total_steps % 500 == 0:
+            #     loss = agent.learn()
+            #     losses.append(loss)
+            #
+            # if total_steps > 0 and total_steps % action_std_decay_freq == 0:
+            #     agent.decay_action_std(action_std_decay_rate, min_action_std)
+
+            if epsilon_override is not None:
+                transition = Transition(state_sequence, actions, reward, done, logprob, state_value,
+                                        hidden_state, cell_state)
+                message = TransitionMessage(transition, worker_id)
+
+                # Pickle the transition and publish it to the "replay_buffer" channel
+                data = pickle.dumps(message)
+                redis.publish("rac1.fitness-course.replay_buffer", data)
 
             state_sequence = new_state_sequence
 
@@ -129,8 +153,8 @@ def start_worker():
                 # When time left is less than 5 seconds, we increase epsilon as a last ditch effort to explore
                 if epsilon_override is None and time_left < 5:
                     agent.epsilon = 0.25
-                elif agent.epsilon == 0.25 and time_left > 5:  # Reset epsilon to normal if agent hit checkpoint and gained more time
-                    agent.epsilon = configuration["epsilon"]
+                # elif agent.epsilon == 0.25 and time_left > 5:  # Reset epsilon to normal if agent hit checkpoint and gained more time
+                #     agent.epsilon = configuration["epsilon"]
 
             if done:
                 break
@@ -138,9 +162,10 @@ def start_worker():
         scores.append(accumulated_reward)
         avg_score = np.mean(scores[-100:])
 
-        print('score: %.2f' % accumulated_reward, 'checkpoints: %d' % env.n_checkpoints,
+        print('steps %d' % total_steps, 'score: %.2f' % accumulated_reward, 'checkpoints: %d' % env.n_checkpoints,
               'avg score: %.2f' % avg_score, 'chkpt update time: %.0f' % last_model_fetch_time,
-              'eps: %.2f' % agent.epsilon if agent.epsilon > agent.eps_min else '')
+              'action_std: %.2f' % agent.action_std)
+              # 'eps: %.2f' % agent.epsilon if agent.epsilon > agent.eps_min else '')
 
         # Append score to Redis key "scores"
         if epsilon_override is None:
