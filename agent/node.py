@@ -134,7 +134,7 @@ def start():
     # agent = Agent(gamma=0.99, epsilon=1.0, batch_size=batch_size, n_actions=13, eps_end=0.05,
     #               input_dims=features, lr=learning_rate, sequence_length=sequence_length)
 
-    agent = PPOAgent(features, 7, 5e-6, 1e-5, 0.99, 15, 0.2)
+    agent = PPOAgent(features, 7, 5e-6, 1e-5, 0.99, 10, 0.2)
 
     # Load existing model if load_model is set
     if args.model:
@@ -252,10 +252,10 @@ def start():
                 print('\rstep:', steps, 'avg loss: %.2f' % np.mean(losses[-100:]), 'avg_score: %.2f' % np.mean(scores),
                       'epsilon: %.2f' % agent.action_std) # , 'samples/sec: %.2f' % np.mean(samples_history))
 
-            # Save the model every 10000 steps
-            if commit and steps % 10000 == 0:
-                save_model(agent, f"models_bak/rac1_fitness-course_{int(steps/1000)}k.pth")
-                print(f"Saved model to models_bak/rac1_fitness-course_{int(steps/1000)}k.pth")
+            # Save the model every 15 steps
+            if commit and steps % 15 == 0:
+                save_model(agent, f"models_bak/rac1_fitness-course_{steps}.pth")
+                print(f"Saved model to models_bak/rac1_fitness-course_{steps}.pth")
 
             if args.wandb:
                 wandb.log({

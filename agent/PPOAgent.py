@@ -94,7 +94,7 @@ class PPOAgent:
 
         # Normalizing the rewards
         # rewards = torch.tensor(rewards).to(device)
-        rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)  # Magic number to prevent division by zero
+        rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)  # Magic number to prevent division by zero
 
         # Convert list to Tensor
         # old_states = torch.squeeze(states.to(device), dim=0).detach().to(device)

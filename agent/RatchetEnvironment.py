@@ -292,12 +292,12 @@ class RatchetEnvironment:
                 reward += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.8
 
                 self.frames_moving_away_from_checkpoint = 0
-        else:
-            self.frames_moving_away_from_checkpoint += 1
-
-            if self.frames_moving_away_from_checkpoint > 30:
-                self.reward_counters['rewards/distance_from_checkpoint_penalty'] += (self.frames_moving_away_from_checkpoint * 0.00020)
-                reward -= (self.frames_moving_away_from_checkpoint * 0.00020)
+        # else:
+        #     self.frames_moving_away_from_checkpoint += 1
+        #
+        #     if self.frames_moving_away_from_checkpoint > 30:
+        #         self.reward_counters['rewards/distance_from_checkpoint_penalty'] += (self.frames_moving_away_from_checkpoint * 0.00020)
+        #         reward -= (self.frames_moving_away_from_checkpoint * 0.00020)
 
         if distance_from_checkpoint < self.closest_distance_to_checkpoint:
             self.closest_distance_to_checkpoint = distance_from_checkpoint
