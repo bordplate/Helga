@@ -87,12 +87,19 @@ class PPOAgent:
         # Monte Carlo estimate of returns
         rewards = _rewards.clone().detach().to(device)
         dones = dones.clone().detach().to(device)
-        discounts = self.gamma * (1 - dones.float())
-        for idx in reversed(range(len(rewards) - 1)):
-            rewards[idx] += discounts[idx] * rewards[idx + 1]
+
+        # Initialize the next_value to 0.0 for the calculation of terminal states
+        next_value = 0.0
+
+        # We iterate backwards through rewards to accumulate return
+        for idx in reversed(range(len(rewards))):
+            if dones[idx]:
+                next_value = 0  # If done, there is no next state; we reset next_value
+            rewards[idx] = rewards[idx] + self.gamma * next_value
+            next_value = rewards[idx]  # Update next_value to the current reward
 
         # Normalizing the rewards
-        rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)  # Magic number to prevent division by zero
+        rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)  # Prevent division by zero
 
         hidden_states = hidden_states.detach()
         cell_states = cell_states.detach()
