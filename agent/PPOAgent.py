@@ -62,7 +62,6 @@ class PPOAgent:
 
     def choose_action(self, state):
         with torch.no_grad():
-            #state = torch.FloatTensor(state).to(device)
             obs = np.array([state])
             state_sequence = torch.tensor(obs, dtype=torch.float).to(device)
 
@@ -93,23 +92,14 @@ class PPOAgent:
             rewards[idx] += discounts[idx] * rewards[idx + 1]
 
         # Normalizing the rewards
-        # rewards = torch.tensor(rewards).to(device)
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)  # Magic number to prevent division by zero
-
-        # Convert list to Tensor
-        # old_states = torch.squeeze(states.to(device), dim=0).detach().to(device)
-        # old_actions = torch.squeeze(actions.to(device), dim=0).detach().to(device)
-        # old_logprobs = torch.squeeze(logprobs.to(device), dim=0).detach().to(device)
-        # old_state_values = torch.squeeze(state_values.to(device), dim=0).detach().to(device)
-
-        # Calculate advantages
-        # advantages = rewards.detach() - old_state_values.detach()
-        advantages = rewards - state_values.detach()
 
         hidden_states = hidden_states.detach()
         cell_states = cell_states.detach()
 
         losses = []
+
+        self.optimizer.zero_grad()
 
         # Optimize policy for K epochs
         for _ in range(self.K_epochs):
@@ -125,9 +115,12 @@ class PPOAgent:
             # Finding the ratio (pi_theta / pi_theta__old)
             ratios = torch.exp(logprobs - logprobs.detach())
 
+            adv = rewards - state_values.detach()
+            adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+
             # Surrogate loss
-            surr1 = ratios * advantages
-            surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
+            surr1 = ratios * adv
+            surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * adv
             loss = -torch.min(surr1, surr2) + 0.5 * self.mse_loss(state_values.squeeze(), rewards) - 0.01 * dist_entropy
 
             # Gradient step
@@ -137,35 +130,6 @@ class PPOAgent:
             self.optimizer.step()
 
             losses.append(loss.mean().item())
-
-            # # Evaluate old actions and values
-            # logprobs, state_values, dist_entropy, hidden_states, cell_states = (
-            #     self.policy.evaluate(old_states, old_actions, hidden_states, cell_states))
-            #
-            # hidden_states = hidden_states.detach()
-            # cell_states = cell_states.detach()
-            #
-            # # Match state_values tensor dimensions with rewards tensor
-            # state_values = torch.squeeze(state_values)
-            #
-            # # Finding the ratio (pi_theta / pi_theta__old)
-            # ratios = torch.exp(logprobs - old_logprobs.detach())
-            #
-            # # Finding Surrogate loss
-            # surr1 = ratios * advantages
-            # surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
-            #
-            # # Final loss of clipped objective PPO
-            # loss = -torch.min(surr1, surr2) + 0.5 * self.mse_loss(state_values, rewards) - 0.01 * dist_entropy
-            #
-            # # Take gradient step
-            # self.optimizer.zero_grad()
-            # loss.mean().backward()
-            # self.optimizer.step()
-
-            # for name, param in self.policy.named_parameters():
-            #     if param.requires_grad:
-            #         print(f"{name} has gradient: {param.grad is not None}")
 
         # Copy new weights into old policy
         self.policy_old.load_state_dict(self.policy.state_dict())
