@@ -173,13 +173,13 @@ class RatchetEnvironment:
         right_joy_x = 0.0
 
         if actions[0] > 0.1 or actions[0] < -0.1:
-            right_joy_x = actions[0]
+            right_joy_x = max(-1, min(1, actions[0]))
         if actions[1] > 0.1 or actions[1] < -0.1:
-            right_joy_y = actions[1]
+            right_joy_y = max(-1, min(1, actions[1]))
         if actions[2] > 0.1 or actions[2] < -0.1:
-            left_joy_x = actions[2]
+            left_joy_x = max(-1, min(1, actions[2]))
         if actions[3] > 0.1 or actions[3] < -0.1:
-            left_joy_y = actions[3]
+            left_joy_y = max(-1, min(1, actions[3]))
 
         # if actions[0] > 0.5:
         #     action |= 0x1000  # Up

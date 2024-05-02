@@ -71,7 +71,7 @@ class Buffer:
 
         :returns: Tensor of states, actions, rewards, dones, logprobs, state_values, hidden_states, cell_states
         """
-        num_samples = min(self.read_position, 2048)
+        num_samples = min(self.read_position, 30000)
         self.read_position = num_samples
 
         # Make num samples a multiple of batch size

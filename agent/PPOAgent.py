@@ -22,7 +22,7 @@ class PPOAgent:
 
         self.device = device
 
-        self.batch_size = 64
+        self.batch_size = 256
 
         self.replay_buffers = []
 
@@ -32,9 +32,6 @@ class PPOAgent:
             {'params': self.policy.actor.parameters(), 'lr': lr_actor},
             {'params': self.policy.critic.parameters(), 'lr': lr_critic}
         ])
-
-        # self.policy_old = ActorCritic(state_dim, action_dim, action_std_init).to(device)
-        # self.policy_old.load_state_dict(self.policy.state_dict())
 
         self.mse_loss = nn.MSELoss()
 
@@ -81,9 +78,9 @@ class PPOAgent:
         self.policy.actor.train()
         self.policy.critic.train()
 
-        self.optimizer.zero_grad()
-
         losses = []
+
+        self.optimizer.zero_grad()
 
         # Optimize policy for K epochs
         for _ in range(self.K_epochs):
@@ -115,7 +112,7 @@ class PPOAgent:
                 # Finding the ratio (pi_theta / pi_theta__old)
                 ratios = torch.exp(logprobs - old_logprobs.detach())
 
-                # Finding Surrogate Loss
+                # Calculating the advantages
                 advantages = rewards - state_values.detach()
                 advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
@@ -129,18 +126,18 @@ class PPOAgent:
                 # loss = actor_loss + 0.01 * dist_entropy + critic_loss
 
                 # Take gradient step
-                self.optimizer.zero_grad()
                 loss.mean().backward()
-
                 losses.append(loss.mean().item())
+
+            # Clip the gradients
+            nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
+
+            self.optimizer.step()
+            self.optimizer.zero_grad()
 
         # for name, param in self.policy.named_parameters():
         #     if param.grad is not None:
         #         print(name, param.grad.norm().item())
-
-        self.optimizer.step()
-        self.optimizer.zero_grad()
-
         buffer.clear_before_read_position()
 
         return np.mean(losses) if len(losses) > 0 else 0

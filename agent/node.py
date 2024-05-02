@@ -63,7 +63,7 @@ def listen_for_messages(redis: Redis, agent: PPOAgent):
                     if data.worker_name in buffers:
                         replay_buffer = buffers[data.worker_name]
                     else:
-                        buffers[data.worker_name] = Buffer(data.worker_name, 10000)
+                        buffers[data.worker_name] = Buffer(data.worker_name, 1000000)
                         agent.replay_buffers.append(buffers[data.worker_name])
                         replay_buffer = buffers[data.worker_name]
 
@@ -135,7 +135,7 @@ def start():
     # agent = Agent(gamma=0.99, epsilon=1.0, batch_size=batch_size, n_actions=13, eps_end=0.05,
     #               input_dims=features, lr=learning_rate, sequence_length=sequence_length)
 
-    agent = PPOAgent(features, 7, 1e-2, 1e-2, 0.99, 5, 0.2)
+    agent = PPOAgent(features, 7, 1e-5, 5e-5, 0.99, 10, 0.2)
 
     # Load existing model if load_model is set
     if args.model:
@@ -193,7 +193,7 @@ def start():
 
     action_std = 0.6  # starting std for action distribution (Multivariate Normal)
     action_std_decay_rate = 0.025  # linearly decay action_std (action_std = action_std - action_std_decay_rate)
-    min_action_std = 0.04  # minimum action_std (stop decay after action_std <= min_action_std)
+    min_action_std = 0.05  # minimum action_std (stop decay after action_std <= min_action_std)
     action_std_decay_freq = int(4000)  # action_std decay frequency (in num timesteps)
 
     print("Starting training loop...")
@@ -202,17 +202,21 @@ def start():
     while True:
         processed = False
 
-        print("\rProcessed samples: ", n_processed, end="")
-
+        print("\r", end="")
+        i = 0
         for replay_buffer in agent.replay_buffers:
-            if replay_buffer.total >= 128 * 1:
+            print(f"[{i}:{replay_buffer.total}", end="")
+            i += 1
+
+            if replay_buffer.total >= 512 * 4:
+                print("*]", end="")
                 n_processed += replay_buffer.total
                 replay_buffer.lock_read_position()
                 loss = agent.learn(replay_buffer)
                 losses.append(loss)
                 processed = True
-
-                print("\rProcessed samples: ", n_processed, end="")
+            else:
+                print("]", end="")
 
         if not processed:
             time.sleep(0.1)

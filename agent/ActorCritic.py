@@ -17,21 +17,6 @@ class ActorCritic(nn.Module):
         self.action_dim = action_dim
         self.action_var = torch.full((action_dim,), action_std_init * action_std_init).to(device)
 
-        # self.actor = nn.Sequential(
-        #     nn.Linear(state_dim, 64),
-        #     nn.LeakyReLU(),
-        #     nn.Linear(64, 64),
-        #     nn.LeakyReLU(),
-        #     nn.Linear(64, self.action_dim)
-        # )
-        # self.critic = nn.Sequential(
-        #     nn.Linear(state_dim, 64),
-        #     nn.LeakyReLU(),
-        #     nn.Linear(64, 64),
-        #     nn.LeakyReLU(),
-        #     nn.Linear(64, 1)
-        # )
-
         self.actor = Actor(state_dim, action_dim)
         self.critic = Critic(state_dim, 1)
 
@@ -89,6 +74,9 @@ class Actor(nn.Module):
 
         self.num_layers = 2
 
+        self.norm = nn.LayerNorm([8, feature_count])
+        # self.instance_norm = nn.InstanceNorm1d(143)
+
         self.fc0 = nn.Linear(feature_count - 128, self.hidden_dims_halved)
         # self.bn0 = nn.BatchNorm1d(self.hidden_dims)
 
@@ -122,8 +110,11 @@ class Actor(nn.Module):
             hidden_state = torch.zeros(self.num_layers, state.size(0), self.hidden_dims).to(device)
             cell_state = torch.zeros(self.num_layers, state.size(0), self.hidden_dims).to(device)
 
+        state = self.norm(state)
+        # state = self.instance_norm(state.permute(0, 2, 1)).permute(0, 2, 1)
+
         x = F.leaky_relu(self.fc0(state[:, :, :15]), 0.01)
-        # x = self.bn0(x)
+        # x = self.bn0(x.reshape(state.shape[0], -1)).reshape(state.shape[0], 8, self.hidden_dims_halved)
 
         # Parts of the state gets pre-processed by a CNN
 
@@ -164,7 +155,7 @@ class Actor(nn.Module):
         x = F.leaky_relu(self.fc3(x), 0.01)
         # x = self.bn3(x)
 
-        x = torch.tanh(self.fc4(x))
+        x = 1 * torch.tanh(self.fc4(x))
 
         return x, (hidden_state, cell_state)
 
@@ -177,6 +168,8 @@ class Critic(nn.Module):
 
         self.hidden_dims = 256
         self.hidden_dims_halved = int(self.hidden_dims / 2)
+
+        self.norm = nn.LayerNorm(feature_count)
 
         self.fc0 = nn.Linear(feature_count - 128, self.hidden_dims_halved)
         # self.bn0 = nn.BatchNorm1d(self.hidden_dims)
@@ -195,16 +188,18 @@ class Critic(nn.Module):
         )
 
         self.fc1 = nn.Linear(self.hidden_dims, self.hidden_dims)
-        self.bn1 = nn.BatchNorm1d(self.hidden_dims)
+        # self.bn1 = nn.BatchNorm1d(self.hidden_dims)
         self.fc2 = nn.Linear(self.hidden_dims, self.hidden_dims)
-        self.bn2 = nn.BatchNorm1d(self.hidden_dims)
+        # self.bn2 = nn.BatchNorm1d(self.hidden_dims)
 
         self.fc3 = nn.Linear(self.hidden_dims, self.hidden_dims)
-        self.bn3 = nn.BatchNorm1d(self.hidden_dims)
+        # self.bn3 = nn.BatchNorm1d(self.hidden_dims)
 
         self.fc4 = nn.Linear(self.hidden_dims, self.action_dim)
 
     def forward(self, state):
+        state = self.norm(state)
+
         x = F.leaky_relu(self.fc0(state[:, :, :15]), 0.01)
         # x = self.bn0(x)
 
@@ -235,13 +230,13 @@ class Critic(nn.Module):
         x = torch.cat((x, cnn_out), dim=2)
 
         x = F.leaky_relu(self.fc1(x[:, -1, :]), 0.01)
-        x = self.bn1(x)
+        # x = self.bn1(x)
 
         x = F.leaky_relu(self.fc2(x), 0.01)
-        x = self.bn2(x)
+        # x = self.bn2(x)
 
         x = F.leaky_relu(self.fc3(x), 0.01)
-        x = self.bn3(x)
+        # x = self.bn3(x)
 
         x = self.fc4(x)
 
