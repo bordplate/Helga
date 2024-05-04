@@ -22,8 +22,7 @@ class PPOAgent:
 
         self.device = device
 
-        self.batch_size = 512
-
+        self.batch_size = 128
         self.replay_buffers = []
 
         self.policy = ActorCritic(state_dim, action_dim, action_std_init).to(device)
@@ -110,10 +109,11 @@ class PPOAgent:
                 # cell_states = cell_states.detach()
 
                 # Evaluating old actions and values
-                logprobs, state_values, dist_entropy, _, _, kl_div = self.policy.evaluate(states, actions, hidden_states, cell_states, mus, log_stds)
+                logprobs, state_values, dist_entropy, _, _, kl_div = self.policy.evaluate(states, actions, None, None, mus, log_stds)
+                # logprobs, state_values, dist_entropy, _, _, kl_div = self.policy.evaluate(states, actions, hidden_states, cell_states, mus, log_stds)
 
                 # Finding the ratio (pi_theta / pi_theta__old)
-                ratios = torch.exp(logprobs - old_logprobs.detach())
+                ratios = torch.exp(logprobs - old_logprobs.squeeze(dim=1).detach())
 
                 # Calculating the advantages
                 # Parameters for GAE
@@ -142,10 +142,10 @@ class PPOAgent:
                 surr1 = ratios * advantages
                 surr2 = torch.clamp(ratios, 1-self.eps_clip, 1+self.eps_clip) * advantages
 
-                actor_loss = -torch.min(surr1, surr2)
+                actor_loss = -torch.min(surr1, surr2).mean()
                 critic_loss = self.mse_loss(state_values.squeeze(), rewards)
 
-                policy_losses.append(actor_loss.mean().item())
+                policy_losses.append(actor_loss.item())
                 value_losses.append(critic_loss.item())
 
                 kl_coef = 0.01
@@ -158,11 +158,11 @@ class PPOAgent:
                 # loss = actor_loss + 0.01 * dist_entropy + critic_loss
 
                 self.optimizer.zero_grad()
-                loss.mean().backward()
-                losses.append(loss.mean().item())
+                loss.backward()
+                losses.append(loss.item())
 
                 # Clip the gradients
-                nn.utils.clip_grad_norm_(self.policy.actor.parameters(), 0.1)
+                nn.utils.clip_grad_norm_(self.policy.actor.parameters(), 0.5)
 
                 self.optimizer.step()
 

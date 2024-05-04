@@ -137,7 +137,7 @@ def start():
     # agent = Agent(gamma=0.99, epsilon=1.0, batch_size=batch_size, n_actions=13, eps_end=0.05,
     #               input_dims=features, lr=learning_rate, sequence_length=sequence_length)
 
-    agent = PPOAgent(features, 7, 1e-6, 1e-6, 0.99, 4, 0.2)
+    agent = PPOAgent(features, 7, 5e-5, 1e-4, 0.99, 2, 0.2)
 
     # Load existing model if load_model is set
     if args.model:
@@ -212,7 +212,7 @@ def start():
             print(f"[{i}:{replay_buffer.total}", end="")
             i += 1
 
-            if replay_buffer.total >= 1024 * 4:
+            if replay_buffer.total >= 512:
                 print("*]", end="")
                 n_processed += replay_buffer.total
                 replay_buffer.lock_read_position()

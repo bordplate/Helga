@@ -219,6 +219,17 @@ def start_worker():
             hidden_state, cell_state = agent.policy.hidden_state.detach(), agent.policy.cell_state.detach()
 
             actions, _, logprob, state_value, mu, log_std = agent.choose_action(state_sequence)
+
+            # # Add noise to the actions
+            # actions = actions + np.random.normal(0, agent.action_std, size=actions.shape)
+            #
+            # # Clip the actions to be within the range [-1, 1]
+            # actions = np.clip(actions, -1, 1)
+
+            # # We need new logprob for the actions with noise
+            # logprob = agent.policy.actor.logprob(state_sequence, actions, hidden_state, cell_state)
+
+
             new_state, reward, done = env.step(actions)
 
             state_stats.update(new_state)
