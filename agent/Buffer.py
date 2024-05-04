@@ -9,9 +9,9 @@ from threading import Lock
 
 
 Transition = namedtuple('Transition', ('state', 'action', 'reward',
-                                       'done',  'logprob', 'state_value', 'hidden_state', 'cell_state'))
+                                       'done',  'logprob', 'state_value', 'mu', 'log_std', 'hidden_state', 'cell_state'))
 FullTransition = namedtuple('Transition', ('state', 'action', 'reward',
-                                       'done', 'logprob', 'state_value', 'hidden_state', 'cell_state'))
+                                       'done', 'logprob', 'state_value', 'mu', 'log_std', 'hidden_state', 'cell_state'))
 TransitionMessage = namedtuple('TransitionMessage', ('transition', 'worker_name'))
 
 class Buffer:
@@ -29,7 +29,7 @@ class Buffer:
 
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-    def add(self, state, actions, reward, done, logprob, state_value, last_hidden_state, last_cell_state):
+    def add(self, state, actions, reward, done, logprob, state_value, mu, log_std, last_hidden_state, last_cell_state):
         state = torch.tensor(state, dtype=torch.float32)
         reward = torch.tensor(reward, dtype=torch.float32)
         done = torch.tensor(done, dtype=torch.bool)
@@ -39,7 +39,7 @@ class Buffer:
 
         self.lock.acquire()
 
-        self.buffer[self.position] = (state, actions, reward, done, logprob, state_value, hidden_state, cell_state)
+        self.buffer[self.position] = (state, actions, reward, done, logprob, state_value, mu, log_std, hidden_state, cell_state)
 
         self.position = (self.position + 1) % self.capacity
         self.lock.release()
@@ -88,7 +88,7 @@ class Buffer:
                 yield self._process_batch(batch)
 
     def _process_batch(self, batch):
-        states, actions, rewards, dones, logprobs, state_values, hidden_states, cell_states = zip(*batch)
+        states, actions, rewards, dones, logprobs, state_values, mus, log_stds, hidden_states, cell_states = zip(*batch)
 
         states = torch.stack(states).to(self.device)
         actions = torch.stack(actions).to(self.device)
@@ -96,6 +96,8 @@ class Buffer:
         dones = torch.stack(dones).to(self.device)
         logprobs = torch.stack(logprobs).to(self.device)
         state_values = torch.stack(state_values).to(self.device)
+        mus = torch.stack(mus).to(self.device)
+        log_stds = torch.stack(log_stds).to(self.device)
 
         hidden_states = torch.stack(hidden_states).squeeze(dim=-2).permute(1, 0, 2).to(self.device)
         cell_states = torch.stack(cell_states).squeeze(dim=-2).permute(1, 0, 2).to(self.device)
@@ -104,4 +106,4 @@ class Buffer:
         hidden_states = hidden_states.contiguous()
         cell_states = cell_states.contiguous()
 
-        return states, actions, rewards, dones, logprobs, state_values, hidden_states, cell_states
+        return states, actions, rewards, dones, logprobs, state_values, mus, log_stds, hidden_states, cell_states

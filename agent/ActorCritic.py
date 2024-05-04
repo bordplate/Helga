@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.distributions import MultivariateNormal
+from torch.distributions import MultivariateNormal, Normal
 from torch.distributions import Categorical
 import torch.nn.functional as F
 
@@ -33,34 +33,57 @@ class ActorCritic(nn.Module):
     def forward(self):
         raise NotImplementedError
 
+    # def act(self, state):
+    #     action_mean, _, (self.hidden_state, self.cell_state) = self.actor.sample(state, self.hidden_state, self.cell_state)
+    #     cov_mat = torch.diag(self.action_var).unsqueeze(dim=0)
+    #     dist = MultivariateNormal(action_mean, cov_mat)
+    #
+    #     action = dist.sample()
+    #     action_logprob = dist.log_prob(action)
+    #     state_val = self.critic(state)
+    #
+    #     return action.detach(), action_logprob.detach(), state_val.detach()
+    #
     def act(self, state):
-        action_mean, (self.hidden_state, self.cell_state) = self.actor(state, self.hidden_state, self.cell_state)
-        cov_mat = torch.diag(self.action_var).unsqueeze(dim=0)
-        dist = MultivariateNormal(action_mean, cov_mat)
+        action, action_logprob, (self.hidden_state, self.cell_state), mu, log_std =\
+            self.actor.sample(state, self.hidden_state, self.cell_state)
 
-        action = dist.sample()
-        action_logprob = dist.log_prob(action)
-        state_val = self.critic(state)
+        state_value = self.critic(state)
+        return action.detach(), action_logprob.detach(), state_value.detach(), mu, log_std
 
-        return action.detach(), action_logprob.detach(), state_val.detach()
+    # def evaluate(self, state, action, hidden_state=None, cell_state=None):
+    #     action_mean, (new_hidden_state, new_cell_state) = self.actor(state, hidden_state, cell_state)
+    #
+    #     action_var = self.action_var.expand_as(action_mean)
+    #     cov_mat = torch.diag_embed(action_var).to(device)
+    #     dist = MultivariateNormal(action_mean, cov_mat)
+    #
+    #     if self.action_dim == 1:
+    #         action = action.reshape(-1, self.action_dim)
+    #
+    #     action_logprobs = dist.log_prob(action)
+    #     dist_entropy = dist.entropy()
+    #     dist_entropy = -torch.mean(dist_entropy)
+    #
+    #     state_values = self.critic(state)
+    #
+    #     return action_logprobs, state_values, dist_entropy, new_hidden_state, new_cell_state
 
-    def evaluate(self, state, action, hidden_state=None, cell_state=None):
-        action_mean, (new_hidden_state, new_cell_state) = self.actor(state, hidden_state, cell_state)
+    def evaluate(self, state, action, hidden_state=None, cell_state=None, old_mus=None, old_log_stds=None):
+        action_mean, action_log_std, (new_hidden_state, new_cell_state) = self.actor(state, hidden_state, cell_state)
+        action_std = action_log_std.exp()
+        normal = Normal(action_mean, action_std)
+        action_logprobs = normal.log_prob(action)
+        action_logprobs = action_logprobs.sum(1, keepdim=True)  # Sum log probs across dimensions
+        action_logprobs -= torch.log(1 - action.pow(2) + 1e-6).sum(1, keepdim=True)  # Adjustment for tanh
+        dist_entropy = normal.entropy().mean()  # Mean of entropy across batch
+        state_value = self.critic(state)
 
-        action_var = self.action_var.expand_as(action_mean)
-        cov_mat = torch.diag_embed(action_var).to(device)
-        dist = MultivariateNormal(action_mean, cov_mat)
+        # Calculate kl divergence
+        old_normal = Normal(old_mus, old_log_stds.exp())
+        kl_div = torch.distributions.kl.kl_divergence(old_normal, normal).mean()
 
-        if self.action_dim == 1:
-            action = action.reshape(-1, self.action_dim)
-
-        action_logprobs = dist.log_prob(action)
-        dist_entropy = dist.entropy()
-        dist_entropy = -torch.mean(dist_entropy)
-
-        state_values = self.critic(state)
-
-        return action_logprobs, state_values, dist_entropy, new_hidden_state, new_cell_state
+        return action_logprobs, state_value, dist_entropy, new_hidden_state, new_cell_state, kl_div
 
 
 class Actor(nn.Module):
@@ -73,8 +96,10 @@ class Actor(nn.Module):
         self.hidden_dims_halved = int(self.hidden_dims / 2)
 
         self.num_layers = 2
+        self.max_action = 1.0
 
-        self.norm = nn.LayerNorm([8, feature_count])
+        # self.bn0 = nn.BatchNorm1d(feature_count * 8)
+        # self.norm = nn.LayerNorm([8, feature_count])
         # self.instance_norm = nn.InstanceNorm1d(143)
 
         self.fc0 = nn.Linear(feature_count - 128, self.hidden_dims_halved)
@@ -96,21 +121,32 @@ class Actor(nn.Module):
         self.lstm = nn.LSTM(self.hidden_dims, self.hidden_dims, self.num_layers, batch_first=True)
 
         self.fc1 = nn.Linear(self.hidden_dims, self.hidden_dims)
-        # self.bn1 = nn.BatchNorm1d(self.hidden_dims)
+        self.bn1 = nn.BatchNorm1d(self.hidden_dims)
         self.fc2 = nn.Linear(self.hidden_dims, self.hidden_dims)
-        # self.bn2 = nn.BatchNorm1d(self.hidden_dims)
+        self.bn2 = nn.BatchNorm1d(self.hidden_dims)
 
         self.fc3 = nn.Linear(self.hidden_dims, self.hidden_dims)
-        # self.bn3 = nn.BatchNorm1d(self.hidden_dims)
+        self.bn3 = nn.BatchNorm1d(self.hidden_dims)
 
         self.fc4 = nn.Linear(self.hidden_dims, self.action_dim)
+
+        self.log_std = nn.Linear(self.hidden_dims, self.action_dim)
+
+    # Initialize the weights and biases of the model
+    def init_weights(self):
+        for layer in self.children():
+            if hasattr(layer, 'weight'):
+                nn.init.xavier_uniform_(layer.weight)
+            if hasattr(layer, 'bias'):
+                nn.init.zeros_(layer.bias)
 
     def forward(self, state, hidden_state=None, cell_state=None):
         if hidden_state is None or cell_state is None:
             hidden_state = torch.zeros(self.num_layers, state.size(0), self.hidden_dims).to(device)
             cell_state = torch.zeros(self.num_layers, state.size(0), self.hidden_dims).to(device)
 
-        state = self.norm(state)
+        # state = self.bn0(state.reshape(state.shape[0], -1)).reshape(state.shape[0], 8, -1)
+        # state = self.norm(state)
         # state = self.instance_norm(state.permute(0, 2, 1)).permute(0, 2, 1)
 
         x = F.leaky_relu(self.fc0(state[:, :, :15]), 0.01)
@@ -155,9 +191,22 @@ class Actor(nn.Module):
         x = F.leaky_relu(self.fc3(x), 0.01)
         # x = self.bn3(x)
 
-        x = 1 * torch.tanh(self.fc4(x))
+        mu = self.fc4(x)
 
-        return x, (hidden_state, cell_state)
+        log_std = self.log_std(x)
+        log_std = torch.clamp(log_std, -20, 2)
+
+        return mu, log_std, (hidden_state, cell_state)
+
+    def sample(self, state, hidden_state=None, cell_state=None):
+        mu, log_std, states = self.forward(state, hidden_state, cell_state)
+        std = log_std.exp()
+        normal = Normal(mu, std)
+        z = normal.rsample()  # Reparameterization trick
+        action = torch.tanh(z) * self.max_action
+        log_prob = normal.log_prob(z) - torch.log(1 - action.pow(2) + 1e-6)  # log prob adjustment for the tanh squashing
+        log_prob = log_prob.sum(1, keepdim=True)  # Sum log probs across dimensions
+        return action, log_prob, states, mu, log_std
 
 
 class Critic(nn.Module):
@@ -169,7 +218,7 @@ class Critic(nn.Module):
         self.hidden_dims = 256
         self.hidden_dims_halved = int(self.hidden_dims / 2)
 
-        self.norm = nn.LayerNorm(feature_count)
+        # self.norm = nn.LayerNorm([8, feature_count])
 
         self.fc0 = nn.Linear(feature_count - 128, self.hidden_dims_halved)
         # self.bn0 = nn.BatchNorm1d(self.hidden_dims)
@@ -198,7 +247,7 @@ class Critic(nn.Module):
         self.fc4 = nn.Linear(self.hidden_dims, self.action_dim)
 
     def forward(self, state):
-        state = self.norm(state)
+        # state = self.norm(state)
 
         x = F.leaky_relu(self.fc0(state[:, :, :15]), 0.01)
         # x = self.bn0(x)

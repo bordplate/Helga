@@ -95,6 +95,29 @@ def update_configuration(redis: Redis):
     configuration["min_epsilon"] = float(redis.get("rac1.fitness-course.min_epsilon")) if redis.get("rac1.fitness-course.min_epsilon") is not None else 0.005
 
 
+class RunningStats:
+    def __init__(self):
+        self.n = 0
+        self.mean = None
+        self.run_var = None
+
+    def update(self, x):
+        x = np.array(x)  # Ensure x is an array
+        if self.mean is None:
+            self.mean = np.zeros_like(x)
+            self.run_var = np.zeros_like(x)
+
+        self.n += 1
+        old_mean = np.copy(self.mean)
+        self.mean += (x - self.mean) / self.n
+        self.run_var += (x - old_mean) * (x - self.mean)
+
+    def variance(self):
+        return self.run_var / self.n if self.n > 1 else np.zeros_like(self.run_var)
+
+    def standard_deviation(self):
+        return np.sqrt(self.variance())
+
 def start_worker():
     # Get paths from arguments
     import argparse
@@ -154,6 +177,8 @@ def start_worker():
     scores = []
     losses = []
 
+    state_stats = RunningStats()
+
     # Start stepping through the environment
     while True:
         model_timestamp = redis.get("rac1.fitness-course.model_timestamp")
@@ -178,6 +203,13 @@ def start_worker():
         state_sequence = np.zeros((sequence_length, features), dtype=np.float32)
         state_sequence[-1] = state
 
+        for i in range(sequence_length):
+            state_stats.update(state)
+            normalized_state = (state - state_stats.mean) / (state_stats.standard_deviation() + 1e-8)
+            state_sequence[i] = normalized_state
+            if i < sequence_length - 1:
+                state, _, _ = env.step(np.zeros(agent.policy.action_dim))
+
         accumulated_reward = 0
         steps = 0
 
@@ -185,15 +217,18 @@ def start_worker():
 
         while True:
             hidden_state, cell_state = agent.policy.hidden_state.detach(), agent.policy.cell_state.detach()
-            #hidden_state, cell_state = None, None
 
-            actions, _, logprob, state_value = agent.choose_action(state_sequence)
-            state, reward, done = env.step(actions)
+            actions, _, logprob, state_value, mu, log_std = agent.choose_action(state_sequence)
+            new_state, reward, done = env.step(actions)
+
+            state_stats.update(new_state)
+            normalized_new_state = (new_state - state_stats.mean) / (state_stats.standard_deviation() + 1e-8)
+
+            # Roll the state sequence and append the new normalized state
+            new_state_sequence = np.roll(state_sequence, -1, axis=0)
+            new_state_sequence[-1] = normalized_new_state
 
             time_left = (30 * 30 - env.time_since_last_checkpoint) / 30
-
-            new_state_sequence = np.concatenate((state_sequence[1:], [state]))
-
             # agent.replay_buffer.add(state_sequence, actions, reward, new_state_sequence, done, logprob, state_value, None, None)
 
             # if total_steps > 0 and total_steps % 500 == 0:
@@ -205,7 +240,7 @@ def start_worker():
 
             if epsilon_override is None:
                 transition = Transition(state_sequence, actions, reward, done, logprob, state_value,
-                                        hidden_state, cell_state)
+                                        mu, log_std, hidden_state, cell_state)
                 message = TransitionMessage(transition, worker_id)
 
                 # Pickle the transition and publish it to the "replay_buffer" channel

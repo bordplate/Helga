@@ -74,6 +74,8 @@ def listen_for_messages(redis: Redis, agent: PPOAgent):
                         transition.done,
                         transition.logprob,
                         transition.state_value,
+                        transition.mu,
+                        transition.log_std,
                         transition.hidden_state,
                         transition.cell_state,
                     )
@@ -135,7 +137,7 @@ def start():
     # agent = Agent(gamma=0.99, epsilon=1.0, batch_size=batch_size, n_actions=13, eps_end=0.05,
     #               input_dims=features, lr=learning_rate, sequence_length=sequence_length)
 
-    agent = PPOAgent(features, 7, 1e-5, 5e-5, 0.99, 10, 0.2)
+    agent = PPOAgent(features, 7, 1e-6, 1e-6, 0.99, 4, 0.2)
 
     # Load existing model if load_model is set
     if args.model:
@@ -183,6 +185,8 @@ def start():
     thread.start()
 
     losses = []
+    policy_losses = []
+    value_losses = []
 
     steps = 0
 
@@ -208,13 +212,18 @@ def start():
             print(f"[{i}:{replay_buffer.total}", end="")
             i += 1
 
-            if replay_buffer.total >= 512 * 4:
+            if replay_buffer.total >= 1024 * 4:
                 print("*]", end="")
                 n_processed += replay_buffer.total
                 replay_buffer.lock_read_position()
-                loss = agent.learn(replay_buffer)
+                loss, policy_loss, value_loss = agent.learn(replay_buffer)
+
                 losses.append(loss)
+                policy_losses.append(policy_loss)
+                value_losses.append(value_loss)
+
                 processed = True
+                break
             else:
                 print("]", end="")
 
@@ -256,7 +265,8 @@ def start():
 
             if len(losses) > 0:
                 print('\rstep:', steps, 'avg loss: %.2f' % np.mean(losses[-100:]), 'avg_score: %.2f' % np.mean(scores),
-                      'epsilon: %.2f' % agent.action_std) # , 'samples/sec: %.2f' % np.mean(samples_history))
+                      'epsilon: %.2f' % agent.action_std, 'policy_loss: %.2f' % np.mean(policy_losses[-100:]),
+                      'value_loss: %.2f' % np.mean(value_losses[-100:]))
 
             # Save the model every 15 steps
             if commit and steps % 15 == 0:
@@ -270,6 +280,8 @@ def start():
                     "epsilon": agent.action_std,
                     # "samples_per_second": np.mean(samples_history),
                     "avg_checkpoints": np.mean(checkpoints),
+                    "policy_loss": np.mean(policy_losses[-100:]),
+                    "value_loss": np.mean(value_losses[-100:]),
                 })
 
 

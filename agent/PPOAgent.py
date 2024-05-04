@@ -22,7 +22,7 @@ class PPOAgent:
 
         self.device = device
 
-        self.batch_size = 256
+        self.batch_size = 512
 
         self.replay_buffers = []
 
@@ -64,57 +64,80 @@ class PPOAgent:
 
             self.policy.eval()
 
-            action, action_logprob, state_value = self.policy.act(state_sequence)
+            action, action_logprob, state_value, mu, log_std = self.policy.act(state_sequence)
 
-        return action.detach().cpu().flatten(), action, action_logprob, state_value
+        return action.detach().cpu().flatten(), action, action_logprob, state_value, mu, log_std
 
     def learn(self, buffer: Buffer):
         if buffer.total < self.batch_size:
             return 0
-
-        torch.autograd.set_detect_anomaly(True)
 
         self.policy.train()
         self.policy.actor.train()
         self.policy.critic.train()
 
         losses = []
-
-        self.optimizer.zero_grad()
+        policy_losses = []
+        value_losses = []
 
         # Optimize policy for K epochs
         for _ in range(self.K_epochs):
             for (states, actions, _rewards, dones, old_logprobs, old_state_values,
-                 hidden_states, cell_states) in buffer.get_batches(self.batch_size):
-                # Monte Carlo estimate of returns
-                rewards = []
-                dones = dones.clone().detach().to(device)
+                 mus, log_stds, hidden_states, cell_states) in buffer.get_batches(self.batch_size):
+                old_state_values = old_state_values.squeeze().detach()
 
-                # Initialize the next_value to 0.0 for the calculation of terminal states
-                discounted_reward = 0
-                for reward, is_terminal in zip(reversed(_rewards), reversed(dones)):
+                # Monte Carlo estimate of returns
+                _rewards = _rewards.flip(dims=[0])  # Reversing the rewards
+                dones = dones.clone().detach().to(device).flip(dims=[0])  # Reversing the dones
+
+                # Compute returns efficiently using tensor operations
+                discounted_rewards = torch.zeros_like(_rewards)
+                discounted_reward = 0.0
+                for i, (reward, is_terminal) in enumerate(zip(_rewards, dones)):
                     if is_terminal:
                         discounted_reward = 0
                     discounted_reward = reward + (self.gamma * discounted_reward)
+                    discounted_rewards[i] = discounted_reward
 
-                    rewards.insert(0, discounted_reward)
+                discounted_rewards = discounted_rewards.flip(dims=[0])  # Flip back the rewards to original order
 
                 # Normalizing the rewards
-                rewards = torch.tensor(rewards, dtype=torch.float32).to(device)
-                rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)  # Prevent division by zero
+                discounted_rewards = discounted_rewards.to(device)
+                rewards = (discounted_rewards - discounted_rewards.mean()) / (
+                            discounted_rewards.std() + 1e-7)
 
                 # hidden_states = hidden_states.detach()
                 # cell_states = cell_states.detach()
 
                 # Evaluating old actions and values
-                logprobs, state_values, dist_entropy, _, _ = self.policy.evaluate(states, actions, hidden_states, cell_states)
+                logprobs, state_values, dist_entropy, _, _, kl_div = self.policy.evaluate(states, actions, hidden_states, cell_states, mus, log_stds)
 
                 # Finding the ratio (pi_theta / pi_theta__old)
                 ratios = torch.exp(logprobs - old_logprobs.detach())
 
                 # Calculating the advantages
-                advantages = rewards - state_values.detach()
+                # Parameters for GAE
+                lambda_gae = 0.95  # GAE parameter for weighting
+
+                # Initialize gae and discounted_rewards
+                advantages = torch.zeros_like(rewards)
+                gae = 0
+                next_value = 0  # This will be used for the last time step, where there is no next state
+
+                for t in reversed(range(len(rewards))):
+                    if t == len(rewards) - 1:
+                        next_value = 0  # No next state if it's the last timestep
+                    else:
+                        next_value = old_state_values[t + 1]
+
+                    delta = rewards[t] + (self.gamma * next_value * (1 - dones[t].float())) - old_state_values[t]
+                    gae = delta + (self.gamma * lambda_gae * (1 - dones[t].float()) * gae)
+                    advantages[t] = gae
+
+                # Normalizing the advantages
                 advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+                # rewards = advantages + old_state_values
 
                 surr1 = ratios * advantages
                 surr2 = torch.clamp(ratios, 1-self.eps_clip, 1+self.eps_clip) * advantages
@@ -122,22 +145,32 @@ class PPOAgent:
                 actor_loss = -torch.min(surr1, surr2)
                 critic_loss = self.mse_loss(state_values.squeeze(), rewards)
 
-                loss = actor_loss + 0.5 * critic_loss - 0.01 * dist_entropy
+                policy_losses.append(actor_loss.mean().item())
+                value_losses.append(critic_loss.item())
+
+                kl_coef = 0.01
+                ent_coef = 0.01
+
+                loss = actor_loss.mean() + 0.5 * critic_loss - kl_coef * kl_div + ent_coef * dist_entropy
+                # loss = loss / (2048 / self.batch_size)
+                # loss = actor_loss + 0.0 * entropy_loss + critic_loss * 0.5
+                # loss = loss / 1
                 # loss = actor_loss + 0.01 * dist_entropy + critic_loss
 
-                # Take gradient step
+                self.optimizer.zero_grad()
                 loss.mean().backward()
                 losses.append(loss.mean().item())
 
-            # Clip the gradients
-            nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
+                # Clip the gradients
+                nn.utils.clip_grad_norm_(self.policy.actor.parameters(), 0.1)
 
-            self.optimizer.step()
-            self.optimizer.zero_grad()
+                self.optimizer.step()
 
         # for name, param in self.policy.named_parameters():
         #     if param.grad is not None:
         #         print(name, param.grad.norm().item())
         buffer.clear_before_read_position()
 
-        return np.mean(losses) if len(losses) > 0 else 0
+        return (np.mean(losses) if len(losses) > 0 else 0,
+                np.mean(policy_losses) if len(policy_losses) > 0 else 0,
+                np.mean(value_losses) if len(value_losses) > 0 else 0)
