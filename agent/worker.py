@@ -14,7 +14,7 @@ from PPOAgent import PPOAgent
 import pygame
 
 
-features = 15 + 128
+features = 18 + 128
 sequence_length = 8
 
 configuration = {
@@ -220,16 +220,6 @@ def start_worker():
 
             actions, _, logprob, state_value, mu, log_std = agent.choose_action(state_sequence)
 
-            # # Add noise to the actions
-            # actions = actions + np.random.normal(0, agent.action_std, size=actions.shape)
-            #
-            # # Clip the actions to be within the range [-1, 1]
-            # actions = np.clip(actions, -1, 1)
-
-            # # We need new logprob for the actions with noise
-            # logprob = agent.policy.actor.logprob(state_sequence, actions, hidden_state, cell_state)
-
-
             new_state, reward, done = env.step(actions)
 
             state_stats.update(new_state)
@@ -250,13 +240,14 @@ def start_worker():
             #     agent.decay_action_std(action_std_decay_rate, min_action_std)
 
             if epsilon_override is None:
-                transition = Transition(state_sequence, actions, reward, done, logprob, state_value,
-                                        mu, log_std, hidden_state, cell_state)
-                message = TransitionMessage(transition, worker_id)
+                if total_steps > 128:
+                    transition = Transition(state_sequence, actions, reward, done, logprob, state_value,
+                                            mu, log_std, hidden_state, cell_state)
+                    message = TransitionMessage(transition, worker_id)
 
-                # Pickle the transition and publish it to the "replay_buffer" channel
-                data = pickle.dumps(message)
-                redis.publish("rac1.fitness-course.replay_buffer", data)
+                    # Pickle the transition and publish it to the "replay_buffer" channel
+                    data = pickle.dumps(message)
+                    redis.publish("rac1.fitness-course.replay_buffer", data)
             else:
                 # Visualize the actions
                 draw_bars(screen, actions, state_value, time_left/30)

@@ -155,6 +155,11 @@ class Game:
 
     death_count_address = 0xB00500
 
+    joystick_l_x = 0.0
+    joystick_l_y = 0.0
+    joystick_r_x = 0.0
+    joystick_r_y = 0.0
+
     def __init__(self, process_name="rpcs3.exe"):
         self.process_name = process_name
 
@@ -178,12 +183,23 @@ class Game:
     def set_controller_input(self, controller_input, left_joy_x, left_joy_y, right_joy_x, right_joy_y):
         self.process.write_int(self.input_address, controller_input)
 
+        self.joystick_l_x += left_joy_x
+        self.joystick_l_y += left_joy_y
+        self.joystick_r_x += right_joy_x
+        self.joystick_r_y += right_joy_y
+
+        # Clamp joysticks to -1 and 1
+        self.joystick_l_x = max(-1.0, min(1.0, self.joystick_l_x))
+        self.joystick_l_y = max(-1.0, min(1.0, self.joystick_l_y))
+        self.joystick_r_x = max(-1.0, min(1.0, self.joystick_r_x))
+        self.joystick_r_y = max(-1.0, min(1.0, self.joystick_r_y))
+
         joystick = 0
 
-        joystick = joystick | (int((left_joy_x+1) * 127) & 0xFF)
-        joystick = joystick | ((int((left_joy_y+1) * 127) & 0xFF) << 8)
-        joystick = joystick | ((int((right_joy_x+1) * 127) & 0xFF) << 16)
-        joystick = joystick | ((int((right_joy_y+1) * 127) & 0xFF) << 24)
+        joystick = joystick | (int((self.joystick_l_x+1) * 127) & 0xFF)
+        joystick = joystick | ((int((self.joystick_l_y+1) * 127) & 0xFF) << 8)
+        joystick = joystick | ((int((self.joystick_r_x+1) * 127) & 0xFF) << 16)
+        joystick = joystick | ((int((self.joystick_r_y+1) * 127) & 0xFF) << 24)
 
         self.process.write_int(self.joystick_address, joystick)
 

@@ -123,6 +123,11 @@ class RatchetEnvironment:
         self.game.set_player_speed(0)
         self.game.set_item_unlocked(2)
 
+        self.game.joystick_l_x = 0.0
+        self.game.joystick_l_y = 0.0
+        self.game.joystick_r_x = 0.0
+        self.game.joystick_r_y = 0.0
+
         # Clear game inputs so we don't keep moving from the last episode
         self.game.set_controller_input(0, 0.0, 0.0, 0.0, 0.0)
 
@@ -381,21 +386,31 @@ class RatchetEnvironment:
 
         # Build observation state
         state = [
+            # Position
             np.interp(position.x, (0, 500), (-1, 1)),  # 0
             np.interp(position.y, (0, 500), (-1, 1)),  # 1
             np.interp(position.z, (-150, 150), (-1, 1)),  # 2
+            # Checkpoints
             np.interp(checkpoint_position.x, (0, 500), (-1, 1)),  # 3
             np.interp(checkpoint_position.y, (0, 500), (-1, 1)),  # 4
             np.interp(checkpoint_position.z, (-150, 150), (-1, 1)),  # 5
             check_diff_x,  # 6
             check_diff_y,  # 7
             check_diff_z,  # 8
+            # Player data
             np.interp(player_rotation.z, (-20, 20), (-1, 1)),  # 9
             np.interp(distance_from_ground, (-64, 64), (-1, 1)),  # 10
             np.interp(speed, (0, 2), (-1, 1)),  # 11
             np.interp(distance_from_checkpoint, (0, 500), (-1, 1)),  # 12
             np.interp(player_state, (0, 255), (-1, 1)),  # 13
-            np.interp(self.game.get_oscillation_offset(), (-10, 10), (-1, 1)),  # 14
+
+            # Joystick
+            self.game.joystick_l_x,  # 14
+            self.game.joystick_l_y,  # 15
+            self.game.joystick_r_x,  # 16
+            self.game.joystick_r_y,  # 17
+
+            # Collision data
             *self.game.get_collisions()  # 64 collisions + 64 classes
         ]
 

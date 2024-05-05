@@ -4,6 +4,8 @@ from torch.distributions import MultivariateNormal
 from torch.distributions import Categorical
 import numpy as np
 
+import torch.cuda as cuda
+
 from ActorCritic import ActorCritic
 from Buffer import Buffer
 
@@ -17,12 +19,15 @@ class PPOAgent:
     def __init__(self, state_dim, action_dim, lr_actor, lr_critic, gamma, K_epochs, eps_clip, action_std_init=0.6):
         self.action_std = action_std_init
         self.gamma = gamma
+        self.lambda_gae = 0.95
         self.eps_clip = eps_clip
         self.K_epochs = K_epochs
 
+        # self.train_stream = cuda.Stream(priority=-1)
+
         self.device = device
 
-        self.batch_size = 128
+        self.batch_size = 256
         self.replay_buffers = []
 
         self.policy = ActorCritic(state_dim, action_dim, action_std_init).to(device)
@@ -30,7 +35,7 @@ class PPOAgent:
         self.optimizer = torch.optim.Adam([
             {'params': self.policy.actor.parameters(), 'lr': lr_actor},
             {'params': self.policy.critic.parameters(), 'lr': lr_critic}
-        ])
+        ], eps=1e-5)
 
         self.mse_loss = nn.MSELoss()
 
@@ -79,31 +84,34 @@ class PPOAgent:
         policy_losses = []
         value_losses = []
 
+        self.optimizer.zero_grad()
+
         # Optimize policy for K epochs
         for _ in range(self.K_epochs):
             for (states, actions, _rewards, dones, old_logprobs, old_state_values,
-                 mus, log_stds, hidden_states, cell_states) in buffer.get_batches(self.batch_size):
-                old_state_values = old_state_values.squeeze().detach()
+                 mus, log_stds, hidden_states, cell_states, advantages) in buffer.get_batches(self.batch_size):
+                # old_state_values = old_state_values.squeeze().detach()
 
-                # Monte Carlo estimate of returns
-                _rewards = _rewards.flip(dims=[0])  # Reversing the rewards
-                dones = dones.clone().detach().to(device).flip(dims=[0])  # Reversing the dones
+                # # Monte Carlo estimate of returns
+                # _rewards = _rewards.flip(dims=[0])  # Reversing the rewards
+                # dones = dones.flip(dims=[0])  # Reversing the dones
+                #
+                # # Compute returns efficiently using tensor operations
+                # discounted_rewards = torch.zeros_like(_rewards)
+                # discounted_reward = 0.0
+                # for i, (reward, is_terminal) in enumerate(zip(_rewards, dones)):
+                #     if is_terminal:
+                #         discounted_reward = 0
+                #     discounted_reward = reward + (self.gamma * discounted_reward)
+                #     discounted_rewards[i] = discounted_reward
+                #
+                # discounted_rewards = discounted_rewards.flip(dims=[0])  # Flip back the rewards to original order
+                #
+                # # Normalizing the rewards
+                # discounted_rewards = discounted_rewards.to(device)
 
-                # Compute returns efficiently using tensor operations
-                discounted_rewards = torch.zeros_like(_rewards)
-                discounted_reward = 0.0
-                for i, (reward, is_terminal) in enumerate(zip(_rewards, dones)):
-                    if is_terminal:
-                        discounted_reward = 0
-                    discounted_reward = reward + (self.gamma * discounted_reward)
-                    discounted_rewards[i] = discounted_reward
-
-                discounted_rewards = discounted_rewards.flip(dims=[0])  # Flip back the rewards to original order
-
-                # Normalizing the rewards
-                discounted_rewards = discounted_rewards.to(device)
-                rewards = (discounted_rewards - discounted_rewards.mean()) / (
-                            discounted_rewards.std() + 1e-7)
+                rewards = (_rewards - _rewards.mean()) / (
+                            _rewards.std() + 1e-7)
 
                 # hidden_states = hidden_states.detach()
                 # cell_states = cell_states.detach()
@@ -117,22 +125,22 @@ class PPOAgent:
 
                 # Calculating the advantages
                 # Parameters for GAE
-                lambda_gae = 0.95  # GAE parameter for weighting
-
-                # Initialize gae and discounted_rewards
-                advantages = torch.zeros_like(rewards)
-                gae = 0
-                next_value = 0  # This will be used for the last time step, where there is no next state
-
-                for t in reversed(range(len(rewards))):
-                    if t == len(rewards) - 1:
-                        next_value = 0  # No next state if it's the last timestep
-                    else:
-                        next_value = old_state_values[t + 1]
-
-                    delta = rewards[t] + (self.gamma * next_value * (1 - dones[t].float())) - old_state_values[t]
-                    gae = delta + (self.gamma * lambda_gae * (1 - dones[t].float()) * gae)
-                    advantages[t] = gae
+                # lambda_gae = 0.95  # GAE parameter for weighting
+                #
+                # # Initialize gae and discounted_rewards
+                # advantages = torch.zeros_like(rewards)
+                # gae = 0
+                # next_value = 0  # This will be used for the last time step, where there is no next state
+                #
+                # for t in reversed(range(len(rewards))):
+                #     if t == len(rewards) - 1:
+                #         next_value = 0  # No next state if it's the last timestep
+                #     else:
+                #         next_value = old_state_values[t + 1]
+                #
+                #     delta = rewards[t] + (self.gamma * next_value * (1 - dones[t].float())) - old_state_values[t]
+                #     gae = delta + (self.gamma * lambda_gae * (1 - dones[t].float()) * gae)
+                #     advantages[t] = gae
 
                 # Normalizing the advantages
                 advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
@@ -157,14 +165,14 @@ class PPOAgent:
                 # loss = loss / 1
                 # loss = actor_loss + 0.01 * dist_entropy + critic_loss
 
-                self.optimizer.zero_grad()
                 loss.backward()
                 losses.append(loss.item())
 
-                # Clip the gradients
-                nn.utils.clip_grad_norm_(self.policy.actor.parameters(), 0.5)
+            # Clip the gradients
+            nn.utils.clip_grad_norm_(self.policy.actor.parameters(), 1.5)
 
-                self.optimizer.step()
+            self.optimizer.step()
+            self.optimizer.zero_grad()
 
         # for name, param in self.policy.named_parameters():
         #     if param.grad is not None:

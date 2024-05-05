@@ -63,7 +63,7 @@ def listen_for_messages(redis: Redis, agent: PPOAgent):
                     if data.worker_name in buffers:
                         replay_buffer = buffers[data.worker_name]
                     else:
-                        buffers[data.worker_name] = Buffer(data.worker_name, 1000000)
+                        buffers[data.worker_name] = Buffer(data.worker_name, 1000000, agent.gamma, agent.lambda_gae)
                         agent.replay_buffers.append(buffers[data.worker_name])
                         replay_buffer = buffers[data.worker_name]
 
@@ -112,6 +112,8 @@ def load_model(agent: PPOAgent, model_path: str):
 
 
 def start():
+    torch.set_num_threads(1)
+
     # Parse arguments
     args = argparse.ArgumentParser()
     args.add_argument("--redis-host", type=str, default="localhost")
@@ -125,7 +127,7 @@ def start():
 
     # Hyperparameters
     learning_rate = 7e-6
-    features = 15 + 128
+    features = 18 + 128
     batch_size = 256
     train_frequency = 4
     target_update_frequency = 10000  # How often we update the target network
@@ -137,7 +139,7 @@ def start():
     # agent = Agent(gamma=0.99, epsilon=1.0, batch_size=batch_size, n_actions=13, eps_end=0.05,
     #               input_dims=features, lr=learning_rate, sequence_length=sequence_length)
 
-    agent = PPOAgent(features, 7, 5e-5, 1e-4, 0.99, 2, 0.2)
+    agent = PPOAgent(features, 7, 1e-4, 1e-4, 0.99, 15, 0.2)
 
     # Load existing model if load_model is set
     if args.model:
@@ -197,7 +199,7 @@ def start():
 
     action_std = 0.6  # starting std for action distribution (Multivariate Normal)
     action_std_decay_rate = 0.025  # linearly decay action_std (action_std = action_std - action_std_decay_rate)
-    min_action_std = 0.05  # minimum action_std (stop decay after action_std <= min_action_std)
+    min_action_std = 0.1  # minimum action_std (stop decay after action_std <= min_action_std)
     action_std_decay_freq = int(4000)  # action_std decay frequency (in num timesteps)
 
     print("Starting training loop...")
@@ -212,7 +214,7 @@ def start():
             print(f"[{i}:{replay_buffer.total}", end="")
             i += 1
 
-            if replay_buffer.total >= 512:
+            if replay_buffer.total >= 1024 * 1:
                 print("*]", end="")
                 n_processed += replay_buffer.total
                 replay_buffer.lock_read_position()

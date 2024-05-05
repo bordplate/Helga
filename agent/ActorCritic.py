@@ -6,6 +6,8 @@ import torch.nn.functional as F
 
 import numpy as np
 
+from torch.distributions.categorical import Categorical
+
 device = torch.device('cpu')
 if torch.cuda.is_available():
     device = torch.device('cuda:0')
@@ -55,68 +57,28 @@ class ActorCritic(nn.Module):
 
         return action.detach(), action_logprob.detach(), state_value.detach(), mu, log_std
 
-    # def evaluate(self, state, action, hidden_state=None, cell_state=None):
-    #     action_mean, (new_hidden_state, new_cell_state) = self.actor(state, hidden_state, cell_state)
-    #
-    #     action_var = self.action_var.expand_as(action_mean)
-    #     cov_mat = torch.diag_embed(action_var).to(device)
-    #     dist = MultivariateNormal(action_mean, cov_mat)
-    #
-    #     if self.action_dim == 1:
-    #         action = action.reshape(-1, self.action_dim)
-    #
-    #     action_logprobs = dist.log_prob(action)
-    #     dist_entropy = dist.entropy()
-    #     dist_entropy = -torch.mean(dist_entropy)
-    #
-    #     state_values = self.critic(state)
-    #
-    #     return action_logprobs, state_values, dist_entropy, new_hidden_state, new_cell_state
-
-    # def evaluate(self, state, action, hidden_state=None, cell_state=None, old_mus=None, old_log_stds=None):
-    #     action_mean, action_log_std, (new_hidden_state, new_cell_state) = self.actor(state, hidden_state, cell_state)
-    #     action_std = action_log_std.exp()
-    #
-    #     normal = Normal(action_mean, action_std)
-    #
-    #     action_logprobs = normal.log_prob(action)
-    #     action_logprobs = action_logprobs.sum(1, keepdim=True)  # Sum log probs across dimensions
-    #     #action_logprobs -= torch.log(1 - action.pow(2) + 1e-6).sum(1, keepdim=True)  # Adjustment for tanh
-    #
-    #     dist_entropy = normal.entropy().mean()  # .mean()
-    #     state_value = self.critic(state)
-    #
-    #     # Calculate kl divergence
-    #     old_normal = Normal(old_mus, old_log_stds.exp())
-    #     kl_div = torch.distributions.kl.kl_divergence(old_normal, normal).mean()
-    #
-    #     return action_logprobs, state_value, dist_entropy, new_hidden_state, new_cell_state, kl_div
-
     def evaluate(self, state, action, hidden_state=None, cell_state=None, old_mus=None, old_log_stds=None):
-        mu, log_std, (new_hidden_state, new_cell_state) = self.actor(state, hidden_state, cell_state)
-        std = log_std.exp()
-        dist = Normal(mu, std)
+        action_mean, log_std, (new_hidden_state, new_cell_state) = self.actor(state, hidden_state, cell_state)
 
-        # Transform actions to the original action space before calculating log probs
-        # Assuming action input is already in the transformed [-max_action, max_action] range
-        tanh_action = action / self.actor.max_action
-        # Calculate the original actions from tanh actions
-        # Inverse tanh can be computed as artanh(x), but let's directly use actions for log_prob
-        action_logprobs = dist.log_prob(tanh_action).sum(axis=-1, keepdim=True)
-        action_logprobs -= torch.log(self.actor.max_action * (1 - tanh_action.pow(2)) + 1e-6).sum(axis=1, keepdim=True)
-        dist_entropy = dist.entropy().mean()
+        # Calculate the log probability of the action
+        dist = Normal(action_mean, log_std.exp())
 
-        # KL Divergence if old_mus and old_log_stds are provided
-        if old_mus is not None and old_log_stds is not None:
-            old_std = old_log_stds.exp().squeeze()
-            old_dist = Normal(old_mus.squeeze(), old_std)
-            kl_div = torch.distributions.kl.kl_divergence(old_dist, dist).mean()
-        else:
-            kl_div = None
+        if self.action_dim == 1:
+            action = action.reshape(-1, self.action_dim)
 
-        state_value = self.critic(state)
+        logprobs = dist.log_prob(action).sum(axis=-1, keepdim=True)
+        logprobs -= torch.log(1 - action.pow(2) + 1e-6).sum(axis=-1, keepdim=True)
+        dist_entropy = dist.entropy()
+        dist_entropy = -torch.mean(dist_entropy)
 
-        return action_logprobs, state_value, dist_entropy, new_hidden_state, new_cell_state, kl_div
+        state_values = self.critic(state)
+
+        # Calculate the KL divergence between the old and new distributions
+        old_dist = Normal(old_mus, old_log_stds.exp())
+        # new_dist = Normal(action_mean.detach(), log_std.detach().exp())
+        kl_div = torch.distributions.kl.kl_divergence(old_dist, dist).mean()
+
+        return logprobs, state_values, dist_entropy, new_hidden_state, new_cell_state, kl_div
 
 
 class Actor(nn.Module):
@@ -163,15 +125,17 @@ class Actor(nn.Module):
 
         self.fc4 = nn.Linear(self.hidden_dims, self.action_dim)
 
-        self.log_std = nn.Linear(self.hidden_dims, self.action_dim)
+        # self.log_std = nn.Linear(self.hidden_dims, self.action_dim)
+        self.log_std = nn.Parameter(torch.zeros(1, self.action_dim))
 
     # Initialize the weights and biases of the model
-    def init_weights(self):
-        for layer in self.children():
-            if hasattr(layer, 'weight'):
-                nn.init.xavier_uniform_(layer.weight)
-            if hasattr(layer, 'bias'):
-                nn.init.zeros_(layer.bias)
+    def init_weights(self, std=np.sqrt(2), bias=0.0):
+        # Orthogonal initialization of the weights
+        for name, param in self.named_parameters():
+            if 'weight' in name:
+                nn.init.orthogonal_(param, std)
+            elif 'bias' in name:
+                nn.init.constant_(param, bias)
 
     def forward(self, state, hidden_state=None, cell_state=None):
         if hidden_state is None or cell_state is None:
@@ -182,7 +146,7 @@ class Actor(nn.Module):
         # state = self.norm(state)
         # state = self.instance_norm(state.permute(0, 2, 1)).permute(0, 2, 1)
 
-        x = F.leaky_relu(self.fc0(state[:, :, :15]), 0.01)
+        x = F.leaky_relu(self.fc0(state[:, :, :18]), 0.01)
         # x = self.bn0(x.reshape(state.shape[0], -1)).reshape(state.shape[0], 8, self.hidden_dims_halved)
 
         # Parts of the state gets pre-processed by a CNN
@@ -226,53 +190,25 @@ class Actor(nn.Module):
 
         mu = self.fc4(x)
 
-        log_std = self.log_std(x)
+        log_std = self.log_std.expand_as(mu)
         log_std = torch.clamp(log_std, -20, 2)
 
         return mu, log_std, (hidden_state, cell_state)
 
-    # def sample(self, state, hidden_state=None, cell_state=None):
-    #     mu, log_std, states = self.forward(state, hidden_state, cell_state)
-    #
-    #     # Use provided action_var to adjust the std
-    #     std = log_std.exp()
-    #     dist = Normal(mu, std)
-    #     action = dist.sample()  # Sample an action
-    #     log_prob = dist.log_prob(action)  # Calculate the log probability of the sampled action
-    #     log_prob = log_prob.sum(1, keepdim=True)  # Sum log probs across dimensions if needed
-    #
-    #     tanh_action = torch.tanh(action) * self.max_action
-    #     log_prob -= torch.log(self.max_action * (1 - tanh_action.pow(2)) + 1e-6).sum(axis=1, keepdim=True)
-    #
-    #     return tanh_action, log_prob, states, mu, log_std
-
     def sample(self, state, hidden_state=None, cell_state=None):
-        mu, log_std, (hidden_state, cell_state) = self(state, hidden_state, cell_state)
-        std = log_std.exp()
-        dist = Normal(mu, std)
+        action_mean, log_std, (new_hidden_state, new_cell_state) = self(state, hidden_state, cell_state)
+
+        dist = Normal(action_mean, log_std.exp())
+
         action = dist.sample()
-        log_prob = dist.log_prob(action).sum(axis=-1, keepdim=True)
 
-        # Apply tanh to action samples to ensure they are within the desired range and adjust log_prob accordingly
-        tanh_action = torch.tanh(action) * self.max_action
-        log_prob -= torch.log(self.max_action * (1 - tanh_action.pow(2)) + 1e-6).sum(axis=1, keepdim=True)
+        noise = torch.randn_like(action) * self.action_var
+        tanh_action = (torch.tanh(action + noise) * self.max_action)
 
-        return tanh_action, log_prob, (hidden_state, cell_state), mu, log_std
+        logprob = dist.log_prob(tanh_action).sum(axis=-1, keepdim=True)
+        logprob -= torch.log(self.max_action * (1 - tanh_action.pow(2)) + 1e-6).sum(axis=1, keepdim=True)
 
-    def logprob(self, state, action, hidden_state=None, cell_state=None):
-        obs = np.array([state])
-        state_sequence = torch.tensor(obs, dtype=torch.float).to(device)
-        action = action.to(device)
-
-        mu, log_std, _ = self(state_sequence, hidden_state, cell_state)
-        std = log_std.exp()
-        dist = Normal(mu, std)
-
-        # Calculate the log probability of the action
-        log_prob = dist.log_prob(action).sum(axis=-1, keepdim=True)
-        log_prob -= torch.log(self.max_action * (1 - mu.pow(2)) + 1e-6).sum(axis=1, keepdim=True)
-
-        return log_prob
+        return tanh_action, logprob, (new_hidden_state, new_cell_state), action_mean, log_std
 
 class Critic(nn.Module):
     def __init__(self, feature_count, action_dim):
@@ -314,7 +250,7 @@ class Critic(nn.Module):
     def forward(self, state):
         # state = self.norm(state)
 
-        x = F.leaky_relu(self.fc0(state[:, :, :15]), 0.01)
+        x = F.leaky_relu(self.fc0(state[:, :, :18]), 0.01)
         # x = self.bn0(x)
 
         # Parts of the state gets pre-processed by a CNN
