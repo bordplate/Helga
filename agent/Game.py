@@ -183,16 +183,21 @@ class Game:
     def set_controller_input(self, controller_input, left_joy_x, left_joy_y, right_joy_x, right_joy_y):
         self.process.write_int(self.input_address, controller_input)
 
-        self.joystick_l_x += left_joy_x
-        self.joystick_l_y += left_joy_y
-        self.joystick_r_x += right_joy_x
-        self.joystick_r_y += right_joy_y
+        # self.joystick_l_x += left_joy_x
+        # self.joystick_l_y += left_joy_y
+        # self.joystick_r_x += right_joy_x
+        # self.joystick_r_y += right_joy_y
+        #
+        # # Clamp joysticks to -1 and 1
+        # self.joystick_l_x = max(-1.0, min(1.0, self.joystick_l_x))
+        # self.joystick_l_y = max(-1.0, min(1.0, self.joystick_l_y))
+        # self.joystick_r_x = max(-1.0, min(1.0, self.joystick_r_x))
+        # self.joystick_r_y = max(-1.0, min(1.0, self.joystick_r_y))
 
-        # Clamp joysticks to -1 and 1
-        self.joystick_l_x = max(-1.0, min(1.0, self.joystick_l_x))
-        self.joystick_l_y = max(-1.0, min(1.0, self.joystick_l_y))
-        self.joystick_r_x = max(-1.0, min(1.0, self.joystick_r_x))
-        self.joystick_r_y = max(-1.0, min(1.0, self.joystick_r_y))
+        self.joystick_l_x = max(-1.0, min(1.0, left_joy_x))
+        self.joystick_l_y = max(-1.0, min(1.0, left_joy_y))
+        self.joystick_r_x = max(-1.0, min(1.0, right_joy_x))
+        self.joystick_r_y = max(-1.0, min(1.0, right_joy_y))
 
         joystick = 0
 

@@ -12,10 +12,11 @@ from redis import from_url as redis_from_url
 from PPOAgent import PPOAgent
 
 import pygame
+import torch
 
 
 features = 18 + 128
-sequence_length = 8
+sequence_length = 1
 
 configuration = {
     "model": None,
@@ -101,7 +102,11 @@ class RunningStats:
         self.mean = None
         self.run_var = None
 
-    def update(self, x):
+        self.n_rewards = 0
+        self.mean_rewards = None
+        self.run_var_rewards = None
+
+    def update(self, x, reward=0.0):
         x = np.array(x)  # Ensure x is an array
         if self.mean is None:
             self.mean = np.zeros_like(x)
@@ -111,6 +116,16 @@ class RunningStats:
         old_mean = np.copy(self.mean)
         self.mean += (x - self.mean) / self.n
         self.run_var += (x - old_mean) * (x - self.mean)
+
+        if reward is not None:
+            if self.mean_rewards is None:
+                self.mean_rewards = 0.0
+                self.run_var_rewards = 0.0
+
+            self.n_rewards += 1
+            old_mean_rewards = self.mean_rewards
+            self.mean_rewards += (reward - self.mean_rewards) / self.n_rewards
+            self.run_var_rewards += (reward - old_mean_rewards) * (reward - self.mean_rewards)
 
     def variance(self):
         return self.run_var / self.n if self.n > 1 else np.zeros_like(self.run_var)
@@ -177,6 +192,8 @@ def start_worker():
     scores = []
     losses = []
 
+    max_ep_len = 1024 * 8
+
     state_stats = RunningStats()
 
     # Start stepping through the environment
@@ -191,43 +208,40 @@ def start_worker():
 
         if epsilon_override is None:
             update_configuration(redis)
-            agent.set_action_std(configuration["action_std"])
+            # agent.set_action_std(configuration["action_std"])
             agent.eps_min = configuration["min_epsilon"]
         else:
-            agent.set_action_std(float(epsilon_override))
+            # agent.set_action_std(float(epsilon_override))
             agent.eps_min = float(epsilon_override)
 
         agent.start_new_episode()
         state, _, _ = env.reset()
 
         state_sequence = np.zeros((sequence_length, features), dtype=np.float32)
-        state_sequence[-1] = state
 
-        for i in range(sequence_length):
-            state_stats.update(state)
-            normalized_state = (state - state_stats.mean) / (state_stats.standard_deviation() + 1e-8)
-            state_sequence[i] = normalized_state
-            if i < sequence_length - 1:
-                state, _, _ = env.step(np.zeros(agent.policy.action_dim))
+        # for i in range(sequence_length):
+        #     state_stats.update(state)
+        #     normalized_state = (state - state_stats.mean) / (state_stats.standard_deviation() + 1e-8)
+        #     state_sequence[i] = normalized_state
+        #     if i < sequence_length - 1:
+        #         state, _, _ = env.step(np.zeros(agent.policy.action_dim))
+
+        state_sequence[-1] = state
 
         accumulated_reward = 0
         steps = 0
 
         hidden_state, cell_state = None, None
 
+        last_done = True
+
         while True:
             hidden_state, cell_state = agent.policy.hidden_state.detach(), agent.policy.cell_state.detach()
 
-            actions, _, logprob, state_value, mu, log_std = agent.choose_action(state_sequence)
+            actions, logprob, state_value, mu, log_std = agent.choose_action(state_sequence)
+            actions = actions.squeeze().cpu()
 
             new_state, reward, done = env.step(actions)
-
-            state_stats.update(new_state)
-            normalized_new_state = (new_state - state_stats.mean) / (state_stats.standard_deviation() + 1e-8)
-
-            # Roll the state sequence and append the new normalized state
-            new_state_sequence = np.roll(state_sequence, -1, axis=0)
-            new_state_sequence[-1] = normalized_new_state
 
             time_left = (30 * 30 - env.time_since_last_checkpoint) / 30
             # agent.replay_buffer.add(state_sequence, actions, reward, new_state_sequence, done, logprob, state_value, None, None)
@@ -241,7 +255,7 @@ def start_worker():
 
             if epsilon_override is None:
                 if total_steps > 128:
-                    transition = Transition(state_sequence, actions, reward, done, logprob, state_value,
+                    transition = Transition(state_sequence, actions, reward, last_done, logprob, state_value,
                                             mu, log_std, hidden_state, cell_state)
                     message = TransitionMessage(transition, worker_id)
 
@@ -261,7 +275,16 @@ def start_worker():
                 if done:
                     break
 
+            state_stats.update(new_state, reward)
+            normalized_new_state = (new_state - state_stats.mean) / (state_stats.standard_deviation() + 1e-8)
+
+            # Roll the state sequence and append the new normalized state
+            new_state_sequence = np.roll(state_sequence, -1, axis=0)
+            # new_state_sequence[-1] = normalized_new_state
+            new_state_sequence[-1] = new_state
+
             state_sequence = new_state_sequence
+            last_done = done
 
             accumulated_reward += reward
             steps += 1
@@ -286,10 +309,10 @@ def start_worker():
 
                 if epsilon_override is None:
                     update_configuration(redis)
-                    agent.set_action_std(configuration["action_std"])
+                    # agent.set_action_std(configuration["action_std"])
                     agent.eps_min = configuration["min_epsilon"]
                 else:
-                    agent.set_action_std(float(epsilon_override))
+                    # agent.set_action_std(float(epsilon_override))
                     agent.eps_min = float(epsilon_override)
 
                 # When time left is less than 5 seconds, we increase epsilon as a last ditch effort to explore

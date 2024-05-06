@@ -63,7 +63,7 @@ def listen_for_messages(redis: Redis, agent: PPOAgent):
                     if data.worker_name in buffers:
                         replay_buffer = buffers[data.worker_name]
                     else:
-                        buffers[data.worker_name] = Buffer(data.worker_name, 1000000, agent.gamma, agent.lambda_gae)
+                        buffers[data.worker_name] = Buffer(data.worker_name, 1000000, 1024 * 8, agent.gamma, agent.lambda_gae)
                         agent.replay_buffers.append(buffers[data.worker_name])
                         replay_buffer = buffers[data.worker_name]
 
@@ -139,7 +139,7 @@ def start():
     # agent = Agent(gamma=0.99, epsilon=1.0, batch_size=batch_size, n_actions=13, eps_end=0.05,
     #               input_dims=features, lr=learning_rate, sequence_length=sequence_length)
 
-    agent = PPOAgent(features, 7, 1e-4, 1e-4, 0.99, 15, 0.2)
+    agent = PPOAgent(features, 7, 1e-4, 1e-4, 0.99, 10, 0.2)
 
     # Load existing model if load_model is set
     if args.model:
@@ -189,6 +189,7 @@ def start():
     losses = []
     policy_losses = []
     value_losses = []
+    entropy_losses = []
 
     steps = 0
 
@@ -205,6 +206,8 @@ def start():
     print("Starting training loop...")
     n_processed = 0
 
+    old_model = pickle.dumps(agent.policy.state_dict())
+
     while True:
         processed = False
 
@@ -214,15 +217,16 @@ def start():
             print(f"[{i}:{replay_buffer.total}", end="")
             i += 1
 
-            if replay_buffer.total >= 1024 * 1:
+            if replay_buffer.ready:
                 print("*]", end="")
                 n_processed += replay_buffer.total
-                replay_buffer.lock_read_position()
-                loss, policy_loss, value_loss = agent.learn(replay_buffer)
+
+                loss, policy_loss, value_loss, entropy_loss = agent.learn(replay_buffer)
 
                 losses.append(loss)
                 policy_losses.append(policy_loss)
                 value_losses.append(value_loss)
+                entropy_losses.append(entropy_loss)
 
                 processed = True
                 break
@@ -245,18 +249,19 @@ def start():
         #     samples_history = samples_history[-10:]
 
         if commit:
-            model = pickle.dumps(agent.policy.state_dict())
             optimizer = pickle.dumps(agent.optimizer.state_dict())
 
-            redis.set("rac1.fitness-course.model", model)
+            redis.set("rac1.fitness-course.model", old_model)
             redis.set("rac1.fitness-course.optimizer", optimizer)
             redis.set("rac1.fitness-course.model_timestamp", time.time())
+
+            old_model = pickle.dumps(agent.policy.state_dict())
 
             redis.set("rac1.fitness-course.action_std", agent.action_std)
 
         # Updating model in Redis, log stuff for debub, make backups
         if steps % 5 == 0:
-            agent.decay_action_std(action_std_decay_rate, min_action_std)
+            # agent.decay_action_std(action_std_decay_rate, min_action_std)
 
             # Get the last 100 scores from Redis key "avg_scores" and cast them to floats
             scores = redis.lrange("rac1.fitness-course.avg_scores", -100, -1)
@@ -268,7 +273,7 @@ def start():
             if len(losses) > 0:
                 print('\rstep:', steps, 'avg loss: %.2f' % np.mean(losses[-100:]), 'avg_score: %.2f' % np.mean(scores),
                       'epsilon: %.2f' % agent.action_std, 'policy_loss: %.2f' % np.mean(policy_losses[-100:]),
-                      'value_loss: %.2f' % np.mean(value_losses[-100:]))
+                      'value_loss: %.2f' % np.mean(value_losses[-100:]), 'entropy_loss: %.2f' % np.mean(entropy_losses[-100:]))
 
             # Save the model every 15 steps
             if commit and steps % 15 == 0:
@@ -284,6 +289,7 @@ def start():
                     "avg_checkpoints": np.mean(checkpoints),
                     "policy_loss": np.mean(policy_losses[-100:]),
                     "value_loss": np.mean(value_losses[-100:]),
+                    "entropy_loss": np.mean(entropy_losses[-100:]),
                 })
 
 

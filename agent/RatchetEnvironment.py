@@ -253,6 +253,7 @@ class RatchetEnvironment:
         distance_from_ground = self.game.get_distance_from_ground()
         speed = self.game.get_player_speed()
         player_state = self.game.get_player_state()
+        distance_delta = position.distance_to_2d(pre_player_position)
 
         # Calculate new distances, deltas and differences
         check_delta_x, check_delta_y, check_delta_z = (
@@ -318,7 +319,6 @@ class RatchetEnvironment:
         # If agent is within 4 units of checkpoint, go to next checkpoint or loop around
         if distance_from_checkpoint < 4:
             self.time_since_last_checkpoint = 0
-            self.closest_distance_to_checkpoint = 999999
 
             self.checkpoint += 1
             self.n_checkpoints += 1
@@ -331,6 +331,12 @@ class RatchetEnvironment:
             checkpoint_position = self.checkpoints[self.checkpoint]
             distance_from_checkpoint = self.game.get_player_position().distance_to(checkpoint_position)
 
+            self.closest_distance_to_checkpoint = distance_from_checkpoint
+
+        if distance_from_checkpoint > self.closest_distance_to_checkpoint + 10:
+            # self.reward_counters['rewards/distance_from_checkpoint_penalty'] += 0.02
+            reward -= 0.02
+
         # Various speed related rewards and penalties
 
         # Check that the agent hasn't stopped progressing
@@ -339,10 +345,15 @@ class RatchetEnvironment:
             self.reward_counters['rewards/timeout_penalty'] += 1
             reward -= 1.0
 
-        # # Discourage standing still
-        # if speed <= 0.01 and self.timer > 30 * 5:
-        #     self.reward_counters['rewards/stall_penalty'] += 0.05
-        #     reward -= 0.05
+        # Discourage standing still
+        if distance_delta <= 0.01 and self.timer > 30 * 5:
+            if self.stalled_timer > 30 * 2:
+                self.reward_counters['rewards/stall_penalty'] += 0.05
+                reward -= 0.05
+
+            self.stalled_timer += 1
+        else:
+            self.stalled_timer = 0
 
         # Check that agent is facing a checkpoint by calculating angle between player and checkpoint
         angle = np.arctan2(checkpoint_position.y - position.y, checkpoint_position.x - position.x) - player_rotation.z
