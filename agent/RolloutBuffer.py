@@ -3,18 +3,10 @@ import random
 import torch
 import numpy as np
 
-from collections import namedtuple
-
 from threading import Lock
 
 
-Transition = namedtuple('Transition', ('state', 'action', 'reward',
-                                       'done',  'logprob', 'state_value', 'mu', 'log_std', 'hidden_state', 'cell_state'))
-FullTransition = namedtuple('Transition', ('state', 'action', 'reward',
-                                       'done', 'logprob', 'state_value', 'mu', 'log_std', 'hidden_state', 'cell_state'))
-TransitionMessage = namedtuple('TransitionMessage', ('transition', 'worker_name'))
-
-class Buffer:
+class RolloutBuffer:
     def __init__(self, owner, capacity, batch_size=512, gamma=0.99, lambda_gae=1):
         self.owner = owner
         self.capacity = capacity
@@ -33,26 +25,6 @@ class Buffer:
         self.discounted_reward = 0
 
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-
-    # def compute_returns_and_advantages(self, last_value, done):
-    #     last_gae_lam = 0
-    #
-    #     for step in reversed(range(self.total)):
-    #         if step == self.total - 1:
-    #             next_non_terminal = 1 - torch.tensor(done, dtype=torch.float)
-    #             next_value = last_value
-    #         else:
-    #             next_non_terminal = 1 - self.buffer[step + 1][3].float()
-    #             next_value = self.buffer[step + 1][5]
-    #
-    #         delta = self.buffer[step][2] + self.gamma * next_value * next_non_terminal - self.buffer[step][5]
-    #         last_gae_lam = delta + self.gamma * self.lambda_gae * next_non_terminal * last_gae_lam
-    #
-    #         _return = last_gae_lam + self.buffer[step][5]
-    #
-    #         self.buffer[step] = self.buffer[step] + (last_gae_lam, _return)
-    #
-    #     self.ready = True
 
     def compute_returns_and_advantages(self, last_value, done):
         last_gae_lam = 0
@@ -79,7 +51,7 @@ class Buffer:
 
         self.ready = True  # Mark the buffer as ready for training
 
-    def add(self, state, actions, reward, done, logprob, state_value, mu, log_std, last_hidden_state, last_cell_state):
+    def add(self, state, actions, reward, done, logprob, state_value, mu, log_std):
         if self.ready:
             return
 
@@ -91,21 +63,9 @@ class Buffer:
         reward = torch.tensor(reward, dtype=torch.float32).to(self.device)
         done = torch.tensor(done, dtype=torch.bool).to(self.device)
 
-        hidden_state = last_hidden_state
-        cell_state = last_cell_state
-
-        # # Discounted reward
-        # if done:
-        #     self.discounted_reward = 0
-        # else:
-        #     reward = reward + (self.gamma * self.discounted_reward)
-        #
-        # self.discounted_reward = reward
-
         self.lock.acquire()
 
-        self.buffer[self.position] = (state, actions, reward, done, logprob, state_value, mu, log_std,
-                                      hidden_state, cell_state)
+        self.buffer[self.position] = (state, actions, reward, done, logprob, state_value, mu, log_std)
 
         self.position = (self.position + 1) % self.capacity
         self.lock.release()
@@ -144,8 +104,7 @@ class Buffer:
                 yield self._process_batch(batch)
 
     def _process_batch(self, batch):
-        (states, actions, rewards, dones, logprobs, state_values, mus, log_stds,
-         hidden_states, cell_states, advantages, returns) \
+        (states, actions, rewards, dones, logprobs, state_values, mus, log_stds, advantages, returns) \
             = zip(*batch)
 
         states = torch.stack(states).to(self.device)
@@ -159,11 +118,4 @@ class Buffer:
         advantages = torch.stack(advantages).to(self.device)
         returns = torch.stack(returns).to(self.device)
 
-        # hidden_states = torch.stack(hidden_states).squeeze(dim=-2).permute(1, 0, 2).to(self.device)
-        # cell_states = torch.stack(cell_states).squeeze(dim=-2).permute(1, 0, 2).to(self.device)
-
-        # # Make states contiguous
-        # hidden_states = hidden_states.contiguous()
-        # cell_states = cell_states.contiguous()
-
-        return states, actions, rewards, dones, logprobs, state_values, mus, log_stds, None, None, advantages, returns
+        return states, actions, rewards, dones, logprobs, state_values, mus, log_stds, advantages, returns

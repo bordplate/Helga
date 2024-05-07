@@ -14,15 +14,46 @@ labels = ["LJoyX", "LJoyY", "RJoyX", "RJoyY", "R1", "Cross", "Square"]
 
 # Pygame initialization for visualization
 pygame.init()
-screen_width, screen_height = 1000, 220
+
+bar_y = 0
+bar_height = 220
+
+face_y = bar_height
+face_height = 300
+
+screen_width, screen_height = 1000, bar_height + face_height
+
 screen = pygame.display.set_mode((screen_width, screen_height))
 pygame.display.set_caption("Action Visualization")
 
 font = pygame.font.Font(None, 24)
 
+
+def draw_state_value_face(state_value):
+    """
+    Draw a face that represents the state value, happy for positive and sad for negative from -2 to 2.
+    There are 5 images in total, each representing a different state value.
+
+    Picks an image from ./imgs/face_{state_value}.png
+    """
+    state_value = max(-2, min(2, state_value))
+
+    face_value = int((state_value + 2) / 4 * 5)
+
+    face_img = pygame.image.load(f"imgs/face_{face_value}.png")
+    face_img = pygame.transform.scale(face_img, (screen_width, face_height))
+
+    screen.blit(face_img, (0, bar_height))
+
+    pygame.display.flip()
+
+
 def draw_bars(actions, state_value, progress):
     screen.fill((0, 0, 0))
     for i, action in enumerate(actions):
+        # Clip action to -1 and 1
+        action = max(-1, min(1, action))
+
         color = color_active if action > 0.5 else color_inactive
 
         if i < 4:
@@ -30,7 +61,7 @@ def draw_bars(actions, state_value, progress):
 
         height = int(abs(action) * 90)  # Scale action value to height
         bar_x = i * (bar_width + spacing) + 50
-        bar_y = screen_height - 40 - height
+        bar_y = bar_height - 40 - height
 
         if action < 0:
             bar_y += height
@@ -39,14 +70,16 @@ def draw_bars(actions, state_value, progress):
 
         label = font.render(labels[i], True, (255, 255, 255))
         label_pos_x = bar_x + (bar_width - label.get_width()) // 2  # Calculate x position to center the label
-        screen.blit(label, (label_pos_x, screen_height - 40))
+        screen.blit(label, (label_pos_x, bar_height - 40))
 
     # Draw state_value bar and label, (state_value is between -1 and 1)
+    state_value = max(-2, min(2, state_value)) / 2
+
     _state_value = (state_value + 1) / 2
     _state_value = max(0, min(1, _state_value))
     height = int(abs(state_value) * 90)
     bar_x = 7 * (bar_width + spacing) + 50
-    bar_y = screen_height - 40 - height
+    bar_y = bar_height - 40 - height
 
     if state_value < 0:
         bar_y += height
@@ -61,11 +94,11 @@ def draw_bars(actions, state_value, progress):
 
     label = font.render("State Value", True, (255, 255, 255))
     label_pos_x = bar_x + (bar_width - label.get_width()) // 2
-    screen.blit(label, (label_pos_x, screen_height - 40))
+    screen.blit(label, (label_pos_x, bar_height - 40))
 
     # Draw a progress bar at the bottom of the screen
     progress_bar_width = int(progress * screen_width)
-    pygame.draw.rect(screen, (255, 0, 0xdb), pygame.Rect(0, screen_height - 10, progress_bar_width, 10))
+    pygame.draw.rect(screen, (255, 0, 0xdb), pygame.Rect(0, bar_height - 10, progress_bar_width, 10))
 
     pygame.display.flip()
 
