@@ -139,7 +139,7 @@ def start():
     # agent = Agent(gamma=0.99, epsilon=1.0, batch_size=batch_size, n_actions=13, eps_end=0.05,
     #               input_dims=features, lr=learning_rate, sequence_length=sequence_length)
 
-    agent = PPOAgent(features, 7, 1e-4, 1e-4, 0.99, 10, 0.2)
+    agent = PPOAgent(features, 7, 5e-5, 5e-5, 0.99, 10, 0.2)
 
     # Load existing model if load_model is set
     if args.model:

@@ -112,11 +112,11 @@ class PPOAgent:
                 kl_coef = 0.01
                 ent_coef = 0.01
 
-                entropy_loss = -dist_entropy.mean()
+                entropy_loss = dist_entropy.sum(dim=1).mean()
 
                 entropy_losses.append(entropy_loss.item())
 
-                loss = (actor_loss + ent_coef * entropy_loss + 1 * critic_loss) #/ (buffer.batch_size / self.batch_size)
+                loss = actor_loss + 0.5 * critic_loss # - ent_coef * entropy_loss) #/ (buffer.batch_size / self.batch_size)
                 # loss = actor_loss.mean() + 0.5 * critic_loss - kl_coef * kl_div + ent_coef * entropy_loss
                 # loss = loss / (2048 / self.batch_size)
                 # loss = actor_loss + 0.0 * entropy_loss + critic_loss * 0.5

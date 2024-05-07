@@ -6,7 +6,7 @@ from Game import Game
 
 
 class RatchetEnvironment:
-    def __init__(self, process_name="rpcs3.exe"):
+    def __init__(self, process_name="rpcs3.exe", eval_mode=False):
         self.game = Game(process_name=process_name)
 
         self.checkpoints_template = [
@@ -28,6 +28,8 @@ class RatchetEnvironment:
             [91, 234],
             [275, 40],
         ]
+
+        self.eval_mode = eval_mode
 
         self.checkpoints = []
 
@@ -118,7 +120,15 @@ class RatchetEnvironment:
         # Set player back to full health, just in case
         self.game.set_nanotech(4)
 
-        self.game.set_player_position(Vector3(259, 143, 49.5))
+        spawn_position = Vector3(259, 143, 49.5)
+
+        # 70% chance to spawn at random checkpoint, 30% in evaluation mode
+        if np.random.rand() < (0.7 if not self.eval_mode else 0.3):
+            checkpoint = np.random.randint(0, len(self.checkpoints))
+            spawn_position = self.checkpoints_template[checkpoint]
+            self.checkpoint = (checkpoint + 1) % len(self.checkpoints)
+
+        self.game.set_player_position(spawn_position)
         self.game.set_player_rotation(Vector3(0, 0, -2.5))
         self.game.set_player_speed(0)
         self.game.set_item_unlocked(2)
@@ -245,7 +255,6 @@ class RatchetEnvironment:
             terminal = True
             self.reward_counters['rewards/death_penalty'] += 1.0
             reward -= 1.0
-            print("Lmao he died")
 
         # Get updated player info
         position = self.game.get_player_position()

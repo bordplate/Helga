@@ -82,7 +82,7 @@ class Actor(nn.Module):
 
         self.action_dim = action_dim
 
-        self.hidden_dims = 128
+        self.hidden_dims = 256
         self.hidden_dims_halved = int(self.hidden_dims / 2)
 
         self.num_layers = 2
@@ -108,7 +108,7 @@ class Actor(nn.Module):
             nn.Linear(32 * 4 * 4, self.hidden_dims_halved)  # Adjust the input features of nn.Linear
         )
 
-        # self.lstm = nn.LSTM(self.hidden_dims, self.hidden_dims, self.num_layers, batch_first=True)
+        self.lstm = nn.LSTM(self.hidden_dims, self.hidden_dims, self.num_layers, batch_first=True)
 
         self.fc1 = nn.Linear(self.hidden_dims, self.hidden_dims)
         # self.bn1 = nn.BatchNorm1d(self.hidden_dims)

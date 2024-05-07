@@ -16,7 +16,7 @@ import torch
 
 
 features = 18 + 128
-sequence_length = 1
+sequence_length = 8
 
 configuration = {
     "model": None,
@@ -143,16 +143,16 @@ def start_worker():
     parser.add_argument("--redis-port", type=int, default=6379)
     parser.add_argument("--render", action="store_true", default=True)
     parser.add_argument("--force-watchdog", action="store_false")
-    parser.add_argument("--epsilon", type=float, default=None)
+    parser.add_argument("--eval", type=bool, default=False)
     args = parser.parse_args()
 
     rpcs3_path = args.rpcs3_path
     process_name = args.process_name
     render = args.render
-    epsilon_override = args.epsilon
+    eval_mode = args.eval
 
     # Make new environment and watchdog
-    env = RatchetEnvironment(process_name=process_name)
+    env = RatchetEnvironment(process_name=process_name, eval_mode=eval_mode)
     watchdog = Watchdog(env.game, rpcs3_path=rpcs3_path, process_name=process_name, render=render)
 
     # Randomized worker ID
@@ -166,7 +166,7 @@ def start_worker():
     # Connect to Redis
     redis = redis_from_url(f"redis://{args.redis_host}:{args.redis_port}")
 
-    if epsilon_override is None:
+    if not eval_mode:
         update_configuration(redis)
     else:
         # Pygame initialization for visualization
@@ -175,10 +175,6 @@ def start_worker():
         screen = pygame.display.set_mode((screen_width, screen_height))
         pygame.display.set_caption("Action Visualization")
         globals()["font"] = pygame.font.Font(None, 24)
-
-        print("Running with epsilon override:", epsilon_override)
-        configuration["action_std"] = float(epsilon_override)
-        configuration["min_action_std"] = float(epsilon_override)
 
     # Agent that we will use only for inference
     # agent = PPOAgent(gamma=0.99, epsilon=configuration["epsilon"], batch_size=0, n_actions=13, eps_end=configuration["min_epsilon"],
@@ -206,13 +202,8 @@ def start_worker():
                 agent.load_policy_dict(pickle.loads(configuration["model"]))
                 last_model_fetch_time = float(redis.get("rac1.fitness-course.model_timestamp"))
 
-        if epsilon_override is None:
+        if not eval_mode:
             update_configuration(redis)
-            # agent.set_action_std(configuration["action_std"])
-            agent.eps_min = configuration["min_epsilon"]
-        else:
-            # agent.set_action_std(float(epsilon_override))
-            agent.eps_min = float(epsilon_override)
 
         agent.start_new_episode()
         state, _, _ = env.reset()
@@ -236,7 +227,7 @@ def start_worker():
         last_done = True
 
         while True:
-            hidden_state, cell_state = agent.policy.hidden_state.detach(), agent.policy.cell_state.detach()
+            # hidden_state, cell_state = agent.policy.hidden_state.detach(), agent.policy.cell_state.detach()
 
             actions, logprob, state_value, mu, log_std = agent.choose_action(state_sequence)
             actions = actions.squeeze().cpu()
@@ -253,7 +244,7 @@ def start_worker():
             # if total_steps > 0 and total_steps % action_std_decay_freq == 0:
             #     agent.decay_action_std(action_std_decay_rate, min_action_std)
 
-            if epsilon_override is None:
+            if not eval_mode:
                 if total_steps > 128:
                     transition = Transition(state_sequence, actions, reward, last_done, logprob, state_value,
                                             mu, log_std, hidden_state, cell_state)
@@ -307,20 +298,8 @@ def start_worker():
                         agent.load_policy_dict(pickle.loads(configuration["model"]))
                         last_model_fetch_time = float(redis.get("rac1.fitness-course.model_timestamp"))
 
-                if epsilon_override is None:
+                if not eval_mode:
                     update_configuration(redis)
-                    # agent.set_action_std(configuration["action_std"])
-                    agent.eps_min = configuration["min_epsilon"]
-                else:
-                    # agent.set_action_std(float(epsilon_override))
-                    agent.eps_min = float(epsilon_override)
-
-                # When time left is less than 5 seconds, we increase epsilon as a last ditch effort to explore
-                # if epsilon_override is None and time_left < 5:
-                #     agent.epsilon = 0.25
-                # elif agent.epsilon == 0.25 and time_left > 5:  # Reset epsilon to normal if agent hit checkpoint and gained more time
-                #     agent.epsilon = configuration["epsilon"]
-
             if done:
                 break
 
@@ -328,12 +307,11 @@ def start_worker():
         avg_score = np.mean(scores[-100:])
 
         print('steps %d' % total_steps, 'score: %.2f' % accumulated_reward, 'checkpoints: %d' % env.n_checkpoints,
-              'avg score: %.2f' % avg_score, 'chkpt update time: %.0f' % last_model_fetch_time,
-              'action_std: %.2f' % agent.action_std)
+              'avg score: %.2f' % avg_score, 'chkpt update time: %.0f' % last_model_fetch_time)
               # 'eps: %.2f' % agent.epsilon if agent.epsilon > agent.eps_min else '')
 
         # Append score to Redis key "scores"
-        if epsilon_override is None:
+        if not eval_mode:
             redis.rpush("rac1.fitness-course.avg_scores", accumulated_reward)
 
             redis.rpush("rac1.fitness-course.checkpoints", env.n_checkpoints)
