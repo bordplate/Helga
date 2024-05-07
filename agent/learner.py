@@ -1,17 +1,15 @@
-import pickle
 import time
 import argparse
-import os
 import sys
 
 import torch
 import numpy as np
 import wandb
 
-from PPOAgent import PPOAgent
+from PPO.PPOAgent import PPOAgent
 from RedisHub import RedisHub
 
-from learn import update_graph_html
+from util import update_graph_html
 
 
 class Config:
@@ -142,7 +140,7 @@ def start(args):
 
             # Save the model every 15 steps
             if commit and steps % 15 == 0:
-                redis.save_model_to_file(f"models_bak/rac1_fitness-course_{steps}.pth")
+                redis.save_model_to_file(agent, f"models_bak/rac1_fitness-course_{steps}.pth")
                 print(f"Saved model to models_bak/rac1_fitness-course_{steps}.pth")
 
             if args.wandb:

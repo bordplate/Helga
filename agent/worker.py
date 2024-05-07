@@ -1,12 +1,9 @@
-from Agent import Agent
 from Watchdog import Watchdog
-from RatchetEnvironment import RatchetEnvironment
+from Environments.FitnessCourseEnvironment import FitnessCourseEnvironment
 
 import numpy as np
 
-from PPOAgent import PPOAgent
-
-import torch
+from PPO.PPOAgent import PPOAgent
 
 from RedisHub import RedisHub
 
@@ -28,7 +25,7 @@ def start_worker(args):
     eval_mode = args.eval
 
     # Make new environment and watchdog
-    env = RatchetEnvironment(process_name=process_name, eval_mode=eval_mode)
+    env = FitnessCourseEnvironment(process_name=process_name, eval_mode=eval_mode)
     watchdog = Watchdog(env.game, rpcs3_path=rpcs3_path, process_name=process_name, render=render)
 
     # Watchdog starts RPCS3 and the game for us if it's not already running

@@ -1,13 +1,14 @@
 import time
 import numpy as np
 
-from Game import Vector3
-from Game import Game
+from Game.Game import Game, Vector3
+from Game.Ratchet1Game import Ratchet1Game
+from .RatchetEnvironment import RatchetEnvironment
 
 
-class RatchetEnvironment:
+class FitnessCourseEnvironment(RatchetEnvironment):
     def __init__(self, process_name="rpcs3.exe", eval_mode=False):
-        self.game = Game(process_name=process_name)
+        self.game = Ratchet1Game(process_name=process_name)
 
         self.checkpoints_template = [
             Vector3(226, 143, 49.5),
@@ -53,16 +54,6 @@ class RatchetEnvironment:
         self.frames_moving_away_from_checkpoint = 0
 
         self.reward_counters = {}
-
-    def start(self):
-        process_opened = self.game.open_process()
-        while not process_opened:
-            print("Waiting for process to open...")
-            time.sleep(1)
-            process_opened = self.game.open_process()
-            
-    def stop(self):
-        self.game.close_process()
 
     def reset(self):
         # Check that we've landed on the right level yet
@@ -141,11 +132,6 @@ class RatchetEnvironment:
         # Clear game inputs so we don't keep moving from the last episode
         self.game.set_controller_input(0, 0.0, 0.0, 0.0, 0.0)
 
-        # while self.game.get_player_state() != 107:
-        #     self.game.start_hoverboard_race()
-        #
-        #     self.game.frame_advance()
-
         self.distance_from_checkpoint_per_step = []
 
         # Step once to get the first observation
@@ -155,30 +141,6 @@ class RatchetEnvironment:
         state, reward, terminal = None, 0.0, False
 
         self.timer += 1
-
-        # if self.timer > 30 * 60 * 5:  # 5 minutes
-        #     terminal = True
-        #     self.reward_counters['rewards/timeout_penalty'] += 1
-        #     reward -= 1.0
-        #     print("Timeout!")
-
-        # actions_mapping = [
-        #     0x0,     # No action
-        #     0x8,     # R1
-        #     0x40,    # Cross
-        #     0x80,    # Square
-        #     0x1000,  # Up
-        #     0x2000,  # Right
-        #     0x4000,  # Down
-        #     0x8000,  # Left
-        #
-        #     0x8 | 0x40,  # R1 + Cross
-        #
-        #     0x40 | 0x1000,  # Cross + Up
-        #     0x40 | 0x2000,  # Cross + Right
-        #     0x40 | 0x4000,  # Cross + Down
-        #     0x40 | 0x8000,  # Cross + Left
-        # ]
 
         action = 0
 
@@ -196,14 +158,6 @@ class RatchetEnvironment:
         if actions[3] > 0.1 or actions[3] < -0.1:
             left_joy_y = max(-1, min(1, actions[3]))
 
-        # if actions[0] > 0.5:
-        #     action |= 0x1000  # Up
-        # if actions[1] > 0.5:
-        #     action |= 0x2000  # Right
-        # if actions[2] > 0.5:
-        #     action |= 0x4000  # Down
-        # if actions[3] > 0.5:
-        #     action |= 0x8000  # Left
         if actions[4] > 0.5:
             action |= 0x8   # R1
         if actions[5] > 0.5:
@@ -212,16 +166,6 @@ class RatchetEnvironment:
             action |= 0x80  # Square
 
         death_count = self.game.get_death_count()
-
-        # Discourage excessive jumping because it's annoying
-        # if self.jump_debounce > 0:
-        #     self.jump_debounce -= 1
-        #
-        # if action & 0x40:
-        #     if self.jump_debounce > 0:
-        #         self.reward_counters['rewards/jump_penalty'] += self.jump_debounce * 0.00001
-        #         reward -= self.jump_debounce * 0.00001
-        #     self.jump_debounce += 5
 
         # Communicate game inputs with game
         self.game.set_controller_input(action, left_joy_x, left_joy_y, right_joy_x, right_joy_y)
@@ -313,13 +257,6 @@ class RatchetEnvironment:
                 self.reward_counters['rewards/distance_from_checkpoint_reward'] += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.1
                 reward += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.1
 
-        # else:
-        #     self.frames_moving_away_from_checkpoint += 1
-        #
-        #     if self.frames_moving_away_from_checkpoint > 30:
-        #         self.reward_counters['rewards/distance_from_checkpoint_penalty'] += (self.frames_moving_away_from_checkpoint * 0.00020)
-        #         reward -= (self.frames_moving_away_from_checkpoint * 0.00020)
-
         if distance_from_checkpoint < self.closest_distance_to_checkpoint:
             self.closest_distance_to_checkpoint = distance_from_checkpoint
 
@@ -371,11 +308,6 @@ class RatchetEnvironment:
         if abs(angle) < 0.1:
             self.reward_counters['rewards/facing_checkpoint_reward'] += 0.02
             reward += 0.02
-        # elif abs(angle) < abs(pre_angle):
-        #     # Give reward for moving to face the checkpoint
-        #     self.reward_counters['rewards/rotating_to_face_checkpoint_reward'] += 0.01
-        #     reward += 0.01
-        #     print("Rotating")
 
         # We mostly collect position data to calculate distance traveled for metrics, and don't specifically use it for
         #   rewards or penalties.
@@ -394,11 +326,6 @@ class RatchetEnvironment:
 
             if distance_from_ground < 20:
                 self.distance += distance
-
-        # if player_state == 109 or player_state == 110 or player_state == 111:
-        #     self.reward_counters['rewards/death_penalty'] += 1.0
-        #     reward -= 1.0
-        #     terminal = True
 
         self.distance_from_checkpoint_per_step.append(distance_from_checkpoint)
 

@@ -1,7 +1,6 @@
 import torch
-from torchviz import make_dot
 
-from Agent import DeepQNetwork
+from DQN.Agent import DeepQNetwork
 
 
 # Assuming your input dimensions (for example, 10 features and batch size of 1)

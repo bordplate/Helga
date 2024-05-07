@@ -11,7 +11,7 @@ from threading import Thread
 
 from redis import from_url as redis_from_url
 
-from PPOAgent import PPOAgent
+from PPO.PPOAgent import PPOAgent
 from RolloutBuffer import RolloutBuffer
 
 

@@ -1,7 +1,7 @@
 import threading
 import time
 
-from Game import Game
+from Game.Ratchet1Game import Ratchet1Game
 
 
 class Watchdog:
@@ -10,7 +10,7 @@ class Watchdog:
         RPCS3.
     """
     def __init__(self,
-                 env: Game,
+                 env: Ratchet1Game,
                  process_name: str="rpcs3.exe",
                  rpcs3_path: str = "C:\\Users\\Vetle Hjelle\\Applications\\rpcs3-v0.0.15-12160-86a8e071_win64\\",
                  game_path: str = r"C:\StupidProjects\rac1-gym\build\PS3_GAME",

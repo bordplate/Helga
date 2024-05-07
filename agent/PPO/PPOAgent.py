@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from ActorCritic import ActorCritic
+from PPO.ActorCritic import ActorCritic
 from RolloutBuffer import RolloutBuffer
 
 device = torch.device('cpu')

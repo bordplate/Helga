@@ -1,13 +1,15 @@
 import time
 import numpy as np
 
-from Game import Vector3
-from Game import Game
+from ..Game.Game import Vector3, Game
+from ..Game.Ratchet1Game import Ratchet1Game
+
+from RatchetEnvironment import RatchetEnvironment
 
 
-class RatchetEnvironment:
+class HoverboardEnvironment(RatchetEnvironment):
     def __init__(self, process_name="rpcs3.exe"):
-        self.game = Game(process_name=process_name)
+        self.game = Ratchet1Game(process_name=process_name)
 
         self.checkpoints_template = [
             Vector3(213.6437530517578, 232.98785400390625, 76.0),
@@ -47,16 +49,6 @@ class RatchetEnvironment:
         self.frames_moving_away_from_checkpoint = 0
 
         self.reward_counters = {}
-
-    def start(self):
-        process_opened = self.game.open_process()
-        while not process_opened:
-            print("Waiting for process to open...")
-            time.sleep(1)
-            process_opened = self.game.open_process()
-            
-    def stop(self):
-        self.game.close_process()
 
     def reset(self):
         # Check that we've landed on the right level yet
