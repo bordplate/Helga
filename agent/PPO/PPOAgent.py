@@ -23,13 +23,17 @@ class PPOAgent:
                  K_epochs=5,
                  eps_clip=0.2,
                  log_std=-3.0,
-                 ent_coef=0.01
+                 ent_coef=0.01,
+                 cl_coeff=0.5,
+                 max_grad_norm=0.5
                  ):
         self.gamma = gamma
         self.lambda_gae = 0.95
         self.eps_clip = eps_clip
         self.K_epochs = K_epochs
         self.ent_coef = ent_coef
+        self.cl_coeff = cl_coeff
+        self.max_grad_norm = max_grad_norm
 
         self.device = device
 
@@ -102,14 +106,14 @@ class PPOAgent:
 
                 entropy_losses.append(entropy_loss.item())
 
-                loss = actor_loss + 0.5 * critic_loss  # - self.ent_coef * entropy_loss) #/ (buffer.batch_size / self.batch_size)
+                loss = actor_loss - self.ent_coef * entropy_loss + self.cl_coeff * critic_loss
 
                 self.optimizer.zero_grad()
                 loss.backward()
                 losses.append(loss.item())
 
                 # Clip the gradients
-                nn.utils.clip_grad_norm_(self.policy.actor.parameters(), 0.5)
+                nn.utils.clip_grad_norm_(self.policy.actor.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
         buffer.clear()
