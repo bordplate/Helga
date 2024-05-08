@@ -6,8 +6,6 @@ import torch.nn.functional as F
 
 import numpy as np
 
-from torch.distributions.categorical import Categorical
-
 device = torch.device('cpu')
 if torch.cuda.is_available():
     device = torch.device('cuda:0')
@@ -70,12 +68,11 @@ class Actor(nn.Module):
         self.fc0 = nn.Linear(feature_count - 128, self.hidden_dims_halved)
 
         self.raycast_cnn = nn.Sequential(
-            nn.Conv2d(in_channels=2, out_channels=16, kernel_size=3, stride=1),
+            nn.Linear(128, 256),
             nn.LeakyReLU(),
-            nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, stride=1),
+            nn.Linear(256, 128),
             nn.LeakyReLU(),
-            nn.Flatten(),
-            nn.Linear(32 * 4 * 4, self.hidden_dims_halved)  # Adjust the input features of nn.Linear
+            nn.Linear(128, self.hidden_dims_halved),
         )
 
         self.lstm = nn.LSTM(self.hidden_dims, self.hidden_dims, self.num_layers, batch_first=True)
@@ -114,15 +111,6 @@ class Actor(nn.Module):
         # Separate the raycasting data
         raycasting_data = state[:, :, -128:]  # Last 128 features are raycasting data
 
-        distance_data = raycasting_data[:, :, :64]
-        classes_data = raycasting_data[:, :, 64:]
-
-        distance_data = distance_data.reshape(-1, 8, 8)
-        classes_data = classes_data.reshape(-1, 8, 8)
-
-        # Combine into a single tensor with 2 channels
-        raycasting_data = torch.stack((distance_data, classes_data), dim=1)
-
         # Process all raycasting data through the CNN in one go
         cnn_out = F.leaky_relu(self.raycast_cnn(raycasting_data), 0.01)
 
@@ -135,20 +123,20 @@ class Actor(nn.Module):
         # LSTM
         out, (hidden_state, cell_state) = self.lstm(x, (hidden_state, cell_state))
 
-        x = F.leaky_relu(self.fc1(x[:, -1, :]), 0.01)
+        x = F.leaky_relu(self.fc1(out[:, -1, :]), 0.01)
 
         x = F.leaky_relu(self.fc2(x), 0.01)
 
         mu = F.tanh(self.fc4(x))
 
-        log_std = self.log_std.expand_as(mu)
+        log_std = F.softplus(self.log_std)
         log_std = torch.clamp(log_std, -20, 2)
 
         return mu, log_std, (hidden_state, cell_state)
 
     def get_action(self, state, action=None, hidden_state=None, cell_state=None):
         action_mean, log_std, (hidden_state, cell_state) = self(state, hidden_state, cell_state)
-        action_std = log_std.exp()
+        action_std = log_std
 
         probs = Normal(action_mean, action_std)
 
@@ -169,12 +157,11 @@ class Critic(nn.Module):
         self.fc0 = nn.Linear(feature_count - 128, self.hidden_dims_halved)
 
         self.raycast_cnn = nn.Sequential(
-            nn.Conv2d(in_channels=2, out_channels=16, kernel_size=3, stride=1),
+            nn.Linear(128, 256),
             nn.LeakyReLU(),
-            nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, stride=1),
+            nn.Linear(256, 128),
             nn.LeakyReLU(),
-            nn.Flatten(),
-            nn.Linear(32 * 4 * 4, self.hidden_dims_halved)  # Adjust the input features of nn.Linear
+            nn.Linear(128, self.hidden_dims_halved),
         )
 
         self.fc1 = nn.Linear(self.hidden_dims, self.hidden_dims)
@@ -201,15 +188,6 @@ class Critic(nn.Module):
 
         # Separate the raycasting data
         raycasting_data = state[:, :, -128:]  # Last 128 features are raycasting data
-
-        distance_data = raycasting_data[:, :, :64]
-        classes_data = raycasting_data[:, :, 64:]
-
-        distance_data = distance_data.reshape(-1, 8, 8)
-        classes_data = classes_data.reshape(-1, 8, 8)
-
-        # Combine into a single tensor with 2 channels
-        raycasting_data = torch.stack((distance_data, classes_data), dim=1)
 
         # Process all raycasting data through the CNN in one go
         cnn_out = F.leaky_relu(self.raycast_cnn(raycasting_data), 0.01)
