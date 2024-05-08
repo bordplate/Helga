@@ -197,8 +197,8 @@ class FitnessCourseEnvironment(RatchetEnvironment):
 
         if death_count != self.game.get_death_count():
             terminal = True
-            self.reward_counters['rewards/death_penalty'] += 1.0
-            reward -= 1.0
+            self.reward_counters['rewards/death_penalty'] += 5.0
+            reward -= 5.0
 
         # Get updated player info
         position = self.game.get_player_position()
@@ -247,15 +247,15 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         if distance_from_checkpoint < pre_distance_from_checkpoint and distance_from_checkpoint < self.closest_distance_to_checkpoint:
             dist = pre_distance_from_checkpoint - distance_from_checkpoint
             if dist < 2 and dist > 0.01:
-                self.reward_counters['rewards/distance_from_checkpoint_reward'] += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.8
-                reward += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.8
+                self.reward_counters['rewards/distance_from_checkpoint_reward'] += (pre_distance_from_checkpoint - distance_from_checkpoint) * 1.2
+                reward += (pre_distance_from_checkpoint - distance_from_checkpoint) * 1.2
 
                 self.frames_moving_away_from_checkpoint = 0
-        elif distance_from_checkpoint < pre_distance_from_checkpoint:
-            dist = pre_distance_from_checkpoint - distance_from_checkpoint
-            if dist < 2 and dist > 0.01:
-                self.reward_counters['rewards/distance_from_checkpoint_reward'] += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.1
-                reward += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.1
+        # elif distance_from_checkpoint < pre_distance_from_checkpoint:
+        #     dist = pre_distance_from_checkpoint - distance_from_checkpoint
+        #     if dist < 2 and dist > 0.01:
+        #         self.reward_counters['rewards/distance_from_checkpoint_reward'] += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.1
+        #         reward += (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.1
 
         if distance_from_checkpoint < self.closest_distance_to_checkpoint:
             self.closest_distance_to_checkpoint = distance_from_checkpoint
@@ -271,8 +271,8 @@ class FitnessCourseEnvironment(RatchetEnvironment):
             if self.checkpoint >= len(self.checkpoints):
                 self.checkpoint = 0
 
-            self.reward_counters['rewards/reached_checkpoint_reward'] += 1.5 * self.n_checkpoints
-            reward += 1.5 * self.n_checkpoints
+            self.reward_counters['rewards/reached_checkpoint_reward'] += 6.0  # * self.n_checkpoints
+            reward += 6.0  # * self.n_checkpoints
 
             checkpoint_position = self.checkpoints[self.checkpoint]
             distance_from_checkpoint = self.game.get_player_position().distance_to(checkpoint_position)
@@ -281,7 +281,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
 
         if distance_from_checkpoint > self.closest_distance_to_checkpoint + 10:
             # self.reward_counters['rewards/distance_from_checkpoint_penalty'] += 0.02
-            reward -= 0.02
+            reward -= 0.05
 
         # Various speed related rewards and penalties
 
@@ -289,13 +289,13 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         if self.time_since_last_checkpoint > 30 * 30:  # 30 in-game seconds
             terminal = True
             self.reward_counters['rewards/timeout_penalty'] += 1
-            reward -= 1.0
+            reward -= 2.0
 
         # Discourage standing still
         if distance_delta <= 0.01 and self.timer > 30 * 5:
-            if self.stalled_timer > 30 * 2:
+            if self.stalled_timer > 30:
                 self.reward_counters['rewards/stall_penalty'] += 0.05
-                reward -= 0.05
+                reward -= 0.1
 
             self.stalled_timer += 1
         else:
@@ -305,9 +305,9 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         angle = np.arctan2(checkpoint_position.y - position.y, checkpoint_position.x - position.x) - player_rotation.z
 
         # Give reward for facing the checkpoint
-        if abs(angle) < 0.1:
-            self.reward_counters['rewards/facing_checkpoint_reward'] += 0.02
-            reward += 0.02
+        # if abs(angle) < 0.1:
+        #     self.reward_counters['rewards/facing_checkpoint_reward'] += 0.02
+        #     reward += 0.02
 
         # We mostly collect position data to calculate distance traveled for metrics, and don't specifically use it for
         #   rewards or penalties.
