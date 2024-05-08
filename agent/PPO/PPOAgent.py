@@ -105,7 +105,6 @@ class PPOAgent:
                 value_losses.append(critic_loss.item())
 
                 entropy_loss = dist_entropy.sum(dim=1).mean()
-
                 entropy_losses.append(entropy_loss.item())
 
                 loss = actor_loss - self.ent_coef * entropy_loss + self.cl_coeff * critic_loss
