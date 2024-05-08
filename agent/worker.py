@@ -40,7 +40,7 @@ def start_worker(args):
         import Visualizer
 
     # Agent that we will use only for inference, learning related parameters are not used
-    agent = PPOAgent(features, 7)
+    agent = PPOAgent(features, 7, log_std=-0.5)
 
     total_steps = 0
     episodes = 0
