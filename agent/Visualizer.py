@@ -57,7 +57,7 @@ def draw_bars(actions, state_value, progress):
         color = color_active if action > 0.5 else color_inactive
 
         if i < 4:
-            color = color_active if abs(action) > 0.2 else color_inactive
+            color = color_active if abs(action) > 0.25 else color_inactive
 
         height = int(abs(action) * 90)  # Scale action value to height
         bar_x = i * (bar_width + spacing) + 50

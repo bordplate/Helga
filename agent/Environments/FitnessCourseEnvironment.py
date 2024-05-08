@@ -149,13 +149,13 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         right_joy_y = 0.0
         right_joy_x = 0.0
 
-        if actions[0] > 0.1 or actions[0] < -0.1:
+        if abs(actions[0]) > 0.25:
             right_joy_x = max(-1, min(1, actions[0]))
-        if actions[1] > 0.1 or actions[1] < -0.1:
+        if abs(actions[1]) > 0.25:
             right_joy_y = max(-1, min(1, actions[1]))
-        if actions[2] > 0.1 or actions[2] < -0.1:
+        if abs(actions[2]) > 0.25:
             left_joy_x = max(-1, min(1, actions[2]))
-        if actions[3] > 0.1 or actions[3] < -0.1:
+        if abs(actions[3]) > 0.25:
             left_joy_y = max(-1, min(1, actions[3]))
 
         if actions[4] > 0.5:
