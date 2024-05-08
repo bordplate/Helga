@@ -91,6 +91,8 @@ class PPOAgent:
                 # Finding the ratio (pi_theta / pi_theta__old)
                 ratios = torch.exp(logprobs.mean(dim=1) - old_logprobs.squeeze(dim=1).detach().mean(dim=1))
 
+                # Normalizing the advantages
+                advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-6)
                 advantages = advantages.squeeze()
 
                 surr1 = ratios * advantages
