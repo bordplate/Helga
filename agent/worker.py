@@ -1,3 +1,5 @@
+import torch
+
 from Watchdog import Watchdog
 from Environments.FitnessCourseEnvironment import FitnessCourseEnvironment
 
@@ -132,7 +134,8 @@ if __name__ == "__main__":
 
         args = parser.parse_args()
 
-        start_worker(args)
+        with torch.no_grad():
+            start_worker(args)
     except KeyboardInterrupt:
         print("Exiting...")
         exit(0)
