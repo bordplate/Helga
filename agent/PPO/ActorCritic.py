@@ -103,22 +103,16 @@ class Actor(nn.Module):
 
         x = F.leaky_relu(self.fc0(state[:, :, :18]), 0.01)
 
-        # Parts of the state gets pre-processed by a CNN
-
-        # Raycast states are the last 10 features of each observation
-        batch_size, num_observations, feature_size = state.shape
+        # Parts of the state gets pre-processed by a separate sequence of linear layers
 
         # Separate the raycasting data
         raycasting_data = state[:, :, -128:]  # Last 128 features are raycasting data
 
-        # Process all raycasting data through the CNN in one go
-        cnn_out = F.leaky_relu(self.raycast_cnn(raycasting_data), 0.01)
+        # Process all raycasting data through the raycasting network
+        raycast_out = F.leaky_relu(self.raycast_cnn(raycasting_data), 0.01)
 
-        # Reshape the CNN output back to [batch_size, num_observations, new_feature_size]
-        cnn_out = cnn_out.reshape(batch_size, num_observations, -1)
-
-        # Concatenate the CNN output with the non-raycasting part of state
-        x = torch.cat((x, cnn_out), dim=2)
+        # Concatenate the raycast output with the non-raycasting part of state
+        x = torch.cat((x, raycast_out), dim=2)
 
         # LSTM
         out, (hidden_state, cell_state) = self.lstm(x, (hidden_state, cell_state))
@@ -181,22 +175,16 @@ class Critic(nn.Module):
     def forward(self, state):
         x = F.leaky_relu(self.fc0(state[:, :, :18]), 0.01)
 
-        # Parts of the state gets pre-processed by a CNN
-
-        # Raycast states are the last 10 features of each observation
-        batch_size, num_observations, feature_size = state.shape
+        # Parts of the state gets pre-processed by a separate sequence of linear layers
 
         # Separate the raycasting data
         raycasting_data = state[:, :, -128:]  # Last 128 features are raycasting data
 
-        # Process all raycasting data through the CNN in one go
-        cnn_out = F.leaky_relu(self.raycast_cnn(raycasting_data), 0.01)
+        # Process all raycasting data through the raycasting network
+        raycast_out = F.leaky_relu(self.raycast_cnn(raycasting_data), 0.01)
 
-        # Reshape the CNN output back to [batch_size, num_observations, new_feature_size]
-        cnn_out = cnn_out.reshape(batch_size, num_observations, -1)
-
-        # Concatenate the CNN output with the non-raycasting part of state
-        x = torch.cat((x, cnn_out), dim=2)
+        # Concatenate the raycast output with the non-raycasting part of state
+        x = torch.cat((x, raycast_out), dim=2)
 
         x = F.leaky_relu(self.fc1(x[:, -1, :]), 0.01)
 
