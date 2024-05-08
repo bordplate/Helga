@@ -23,6 +23,7 @@ class Config:
     gamma = 0.99
     K_epochs = 10
     eps_clip = 0.2
+    log_std = -0.5
 
     @staticmethod
     def serialize():
@@ -45,7 +46,8 @@ def start(args):
         Config.mini_batch_size,
         Config.gamma,
         Config.K_epochs,
-        Config.eps_clip
+        Config.eps_clip,
+        Config.log_std
     )
 
     # Load existing model if load_model is set
