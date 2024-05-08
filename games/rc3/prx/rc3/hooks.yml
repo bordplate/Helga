@@ -1,0 +1,25 @@
+# ASM function ported to PRX to make room for the loader
+# Don't remove this
+_shk_prx_elf_substitute:
+    addr: 0xa958b8
+    emitTrampoline: no
+
+cellGameContentPermit:
+    addr: 0x981120
+    replacedInstr: stdu r1, -0x1a0(r1)
+
+cellGameBootCheck:
+    addr: 0x981064
+    replacedInstr: stdu r1, -0x1a0(r1)
+
+pre_game_loop:
+    addr: 0x1d8840
+    emitTrampoline: no
+
+cellPadGetDataRedirect:
+    addr: 0x9432d0
+    replacedInstr: stdu r1, -0xa0(r1)
+
+render:
+    addr: 0x11b434
+    replacedInstr: stdu r1, -0x80(r1)

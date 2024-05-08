@@ -2,6 +2,10 @@
 *.prx
 *.sprx
 
+**/wandb/*
+**/models_bak/*
+
+**/__pycache__/*
 
 # remove userconfigs but keep templates
 userconfig*
@@ -14,8 +18,3 @@ compile_commands.json*
 .vscode/*
 **/build/*
 .vs/*
-
-**/models_bak/*
-**/wandb/*
-
-**/__pycache__/*

@@ -1,0 +1,21 @@
+*.7z
+*.prx
+*.sprx
+
+
+# remove userconfigs but keep templates
+userconfig.mk
+!*.template.mk
+
+.idea/**
+.clangd
+compile_commands.json*
+.cache/*
+.vscode/*
+**/build/*
+.vs/*
+
+**/models_bak/*
+**/wandb/*
+
+**/__pycache__/*

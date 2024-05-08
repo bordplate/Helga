@@ -2,13 +2,13 @@ import time
 import numpy as np
 
 from Game.Game import Game, Vector3
-from Game.Ratchet1Game import Ratchet1Game
+from Game.RC1Game import RC1Game
 from .RatchetEnvironment import RatchetEnvironment
 
 
 class FitnessCourseEnvironment(RatchetEnvironment):
     def __init__(self, process_name="rpcs3.exe", eval_mode=False):
-        self.game = Ratchet1Game(process_name=process_name)
+        self.game = RC1Game(process_name=process_name)
 
         self.checkpoints_template = [
             Vector3(226, 143, 49.5),

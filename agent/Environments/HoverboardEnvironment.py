@@ -2,14 +2,14 @@ import time
 import numpy as np
 
 from ..Game.Game import Vector3, Game
-from ..Game.Ratchet1Game import Ratchet1Game
+from ..Game.RC1Game import RC1Game
 
 from RatchetEnvironment import RatchetEnvironment
 
 
 class HoverboardEnvironment(RatchetEnvironment):
     def __init__(self, process_name="rpcs3.exe"):
-        self.game = Ratchet1Game(process_name=process_name)
+        self.game = RC1Game(process_name=process_name)
 
         self.checkpoints_template = [
             Vector3(213.6437530517578, 232.98785400390625, 76.0),
