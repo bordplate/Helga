@@ -4,6 +4,7 @@ import numpy as np
 
 from PPO.ActorCritic import ActorCritic
 from RolloutBuffer import RolloutBuffer
+from RE3.RandomEncoder import RandomEncoder
 
 device = torch.device('cpu')
 if torch.cuda.is_available():
@@ -25,7 +26,8 @@ class PPOAgent:
                  log_std=-3.0,
                  ent_coef=0.01,
                  cl_coeff=0.5,
-                 max_grad_norm=0.5
+                 max_grad_norm=0.5,
+                 beta=0.1
                  ):
         self.gamma = gamma
         self.lambda_gae = 0.95
@@ -34,12 +36,15 @@ class PPOAgent:
         self.ent_coef = ent_coef
         self.cl_coeff = cl_coeff
         self.max_grad_norm = max_grad_norm
+        self.beta = beta
 
         self.device = device
 
         self.mini_batch_size = mini_batch_size
         self.batch_size = batch_size
         self.replay_buffers = []
+
+        self.random_encoder = RandomEncoder(state_dim).to(device)
 
         self.policy = ActorCritic(state_dim, action_dim, log_std).to(device)
 
@@ -63,9 +68,11 @@ class PPOAgent:
 
             self.policy.eval()
 
-            action, action_logprob, state_value, mu, log_std = self.policy.act(state_sequence)
+            action, action_logprob, state_value, _, _ = self.policy.act(state_sequence)
 
-        return action, action_logprob, state_value, mu, log_std
+            y_t = self.random_encoder(state_sequence.squeeze()[-1])
+
+        return action, action_logprob, state_value, y_t
 
     def learn(self, buffer: RolloutBuffer):
         if buffer.total < self.batch_size:
@@ -83,22 +90,31 @@ class PPOAgent:
         # Optimize policy for K epochs
         for _ in range(self.K_epochs):
             for (states, actions, _rewards, dones, old_logprobs, old_state_values,
-                 mus, log_stds, advantages, returns) in buffer.get_batches(self.mini_batch_size):
+                 y_t, advantages, returns) in buffer.get_batches(self.mini_batch_size):
 
                 # Evaluating old actions and values
                 logprobs, state_values, dist_entropy, _, _, kl_div = self.policy.evaluate(states, actions, None, None)
+                source_y_t = self.random_encoder(states[:, -1, :].squeeze())
+
+                intrinsic_rewards = self.random_encoder.compute_intrinsic_rewards(source_y_t[:, :, 0, 0], y_t.squeeze(), True)
+                intrinsic_rewards = intrinsic_rewards.squeeze().to(device)
+
+                advantages = advantages.squeeze()
+                returns = returns.squeeze()
+
+                advantages = advantages + self.beta * intrinsic_rewards
+                returns = returns + self.beta * intrinsic_rewards
 
                 # Finding the ratio (pi_theta / pi_theta__old)
                 ratios = torch.exp(logprobs.mean(dim=1) - old_logprobs.squeeze(dim=1).detach().mean(dim=1))
 
                 # Normalizing the advantages
                 advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-6)
-                advantages = advantages.squeeze()
 
                 surr1 = ratios * advantages
                 surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
 
-                actor_loss = -torch.min(surr1, surr2).mean()
+                actor_loss = -(torch.min(surr1, surr2)).mean()
                 critic_loss = self.mse_loss(returns.squeeze(), state_values.squeeze())
 
                 policy_losses.append(actor_loss.item())

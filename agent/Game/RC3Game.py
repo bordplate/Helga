@@ -33,18 +33,9 @@ class RC3Game(Game):
     vidcomic_state_address = 0xda5122
 
     def __init__(self, process_name="rpcs3.exe"):
-        self.process_name = process_name
+        super().__init__(process_name)
 
-        self.process = Process(self.process_name, base_offset=self.offset)
-        self.last_frame_count = 0
-        self.must_restart = False
-
-    def open_process(self):
-        return self.process.open_process()
-
-    def close_process(self):
-        self.process.close_process()
-        self.process = None
+        self.game_key = "rc3"
 
     def get_hero_position(self) -> Vector3:
         """Player position is stored in big endian, so we need to convert it to little endian."""

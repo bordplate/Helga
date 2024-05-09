@@ -49,6 +49,11 @@ class RC1Game(Game):
     joystick_r_x = 0.0
     joystick_r_y = 0.0
 
+    def __init__(self, process_name="rpcs3.exe"):
+        super().__init__(process_name)
+
+        self.game_key = "rc1"
+
     def set_controller_input(self, controller_input, left_joy_x, left_joy_y, right_joy_x, right_joy_y):
         self.process.write_int(self.input_address, controller_input)
 

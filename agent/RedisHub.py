@@ -16,7 +16,7 @@ from RolloutBuffer import RolloutBuffer
 
 
 Transition = namedtuple('Transition', ('state', 'action', 'reward',
-                                       'done',  'logprob', 'state_value', 'mu', 'log_std'))
+                                       'done',  'logprob', 'state_value', 'y_t'))
 TransitionMessage = namedtuple('TransitionMessage', ('transition', 'worker_name'))
 
 
@@ -31,9 +31,8 @@ class RedisHub:
         # Randomly generate worker ID
         self.worker_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
-    def add(self, state_sequence, actions, reward, last_done, logprob, state_value, mu, log_std):
-        transition = Transition(state_sequence, actions, reward, last_done, logprob, state_value,
-                                mu, log_std)
+    def add(self, state_sequence, actions, reward, last_done, logprob, state_value, y_t):
+        transition = Transition(state_sequence, actions, reward, last_done, logprob, state_value, y_t)
         message = TransitionMessage(transition, self.worker_id)
 
         # Pickle the transition and publish it to the "replay_buffer" channel
@@ -149,7 +148,7 @@ class RedisHub:
 
                     messages.append(message)
 
-                    if len(messages) > 1000:
+                    if len(messages) > 50000:
                         print("Flushing messages")
 
                         while pubsub.get_message(ignore_subscribe_messages=True) is not None:
@@ -179,8 +178,7 @@ class RedisHub:
                             transition.done,
                             transition.logprob,
                             transition.state_value,
-                            transition.mu,
-                            transition.log_std
+                            transition.y_t,
                         )
         except IndexError as e:
             print(e)

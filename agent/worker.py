@@ -25,6 +25,7 @@ def start_worker(args):
     process_name = args.process_name
     render = args.render
     eval_mode = args.eval
+    project_key = args.project_key
 
     # Make new environment and watchdog
     env = FitnessCourseEnvironment(process_name=process_name, eval_mode=eval_mode)
@@ -35,7 +36,7 @@ def start_worker(args):
     env.start()
 
     # Connect to Redis
-    redis = RedisHub(f"redis://{args.redis_host}:{args.redis_port}", "rac1.fitness-course.rollout_buffer")
+    redis = RedisHub(f"redis://{args.redis_host}:{args.redis_port}", f"{project_key}.rollout_buffer")
 
     if eval_mode:
         # Draws a visualization of the actions and other information
@@ -67,7 +68,7 @@ def start_worker(args):
                 if new_model is not None:
                     agent.load_policy_dict(new_model)
 
-            actions, logprob, state_value, mu, log_std = agent.choose_action(state_sequence)
+            actions, logprob, state_value, y_t = agent.choose_action(state_sequence)
             actions = actions.squeeze().cpu()
 
             new_state, reward, done = env.step(actions)
@@ -75,7 +76,7 @@ def start_worker(args):
             time_left = (30 * 30 - env.time_since_last_checkpoint) / 30
 
             if not eval_mode:
-                redis.add(state_sequence, actions, reward, last_done, logprob, state_value, mu, log_std)
+                redis.add(state_sequence, actions, reward, last_done, logprob, state_value, y_t)
             else:
                 # Visualize the actions
                 Visualizer.draw_bars(actions, state_value, time_left/30)
@@ -111,8 +112,8 @@ def start_worker(args):
 
         # Append score to Redis key "scores"
         if not eval_mode:
-            redis.redis.rpush("rac1.fitness-course.avg_scores", accumulated_reward)
-            redis.redis.rpush("rac1.fitness-course.checkpoints", env.n_checkpoints)
+            redis.redis.rpush(f"{project_key}.avg_scores", accumulated_reward)
+            redis.redis.rpush(f"{project_key}.checkpoints", env.n_checkpoints)
 
         episodes += 1
 
@@ -131,6 +132,7 @@ if __name__ == "__main__":
         parser.add_argument("--render", action="store_true", default=True)
         parser.add_argument("--force-watchdog", action="store_false")
         parser.add_argument("--eval", type=bool, action=argparse.BooleanOptionalAction, default=False)
+        parser.add_argument("--project-key", type=str, default="rac1.fitness-course")
 
         args = parser.parse_args()
 

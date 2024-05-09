@@ -13,11 +13,11 @@ from util import update_graph_html
 
 
 class Config:
-    learning_rate       = 1e-4
+    learning_rate       = 5e-5
     features            = 18 + 128
     actions             = 7
     batch_size          = 1024 * 8
-    mini_batch_size     = int(batch_size / 8)
+    mini_batch_size     = 1024
     sequence_length     = 8
 
     gamma = 0.99
@@ -95,10 +95,9 @@ def start(args):
 
         print("\r", end="")
         for i, replay_buffer in enumerate(agent.replay_buffers):
-            print(f"[{i}:{replay_buffer.total}", end="")
+            print(f"[{i}:{replay_buffer.total}]", end="")
 
             if replay_buffer.ready:
-                print("*]", end="")
                 n_processed += replay_buffer.total
 
                 loss, policy_loss, value_loss, entropy_loss = agent.learn(replay_buffer)
@@ -110,8 +109,6 @@ def start(args):
 
                 processed = True
                 break
-            else:
-                print("]", end="")
 
         if not processed:
             time.sleep(0.1)
@@ -123,7 +120,7 @@ def start(args):
             redis.save_model(agent)
 
         # Updating model in Redis, log stuff for debub, make backups
-        if steps % 5 == 0:
+        if steps % 1 == 0:
             # Get the last 100 scores from Redis key "avg_scores" and cast them to floats
             scores = redis.redis.lrange("rac1.fitness-course.avg_scores", -100, -1)
             scores = [float(score) for score in scores]
@@ -139,6 +136,9 @@ def start(args):
                       'value_loss: %.2f' % np.mean(value_losses[-100:]),
                       'entropy_loss: %.2f' % np.mean(entropy_losses[-100:])
                 )
+
+                log_std_params = [ "%.5f" % x for x in agent.policy.actor.log_std.squeeze().tolist() ]
+                print(f"log_std: {log_std_params}")
 
             # Save the model every 15 steps
             if commit and steps % 15 == 0:

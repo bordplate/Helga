@@ -124,7 +124,7 @@ class Actor(nn.Module):
         mu = F.tanh(self.fc4(x))
 
         log_std = F.softplus(self.log_std)
-        log_std = torch.clamp(log_std, -20, 2)
+        log_std = torch.clamp(log_std, -20, 0.45)
 
         return mu, log_std, (hidden_state, cell_state)
 

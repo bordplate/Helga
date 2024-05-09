@@ -13,6 +13,7 @@ class RolloutBuffer:
         self.buffer = [None] * capacity
         self.position = 0
         self.total = 0
+        self.last_episode_start = 0
         self.lock = Lock()
         self.new_samples = 0
         self.gamma = gamma
@@ -33,7 +34,7 @@ class RolloutBuffer:
         next_non_terminal = 1.0 - float(done)  # Convert `done` to float and invert
 
         # Reverse iteration over your buffer to calculate advantages and returns
-        for step in reversed(range(self.total)):
+        for step in reversed(range(self.last_episode_start, self.total)):
             if step < self.total - 1:
                 next_non_terminal = 1.0 - self.buffer[step + 1][3].float()
                 next_value = self.buffer[step + 1][5]
@@ -49,15 +50,18 @@ class RolloutBuffer:
             # Replace the original transition with the new one that includes advantage and return
             self.buffer[step] = self.buffer[step] + (last_gae_lam, _return)
 
-        self.ready = True  # Mark the buffer as ready for training
+        self.last_episode_start = self.total
 
-    def add(self, state, actions, reward, done, logprob, state_value, mu, log_std):
+    def add(self, state, actions, reward, done, logprob, state_value, y_t):
         if self.ready:
             return
 
-        if self.total >= self.batch_size:
+        if self.total >= self.batch_size or done:
             self.compute_returns_and_advantages(state_value, done)
-            return
+
+            if self.total >= self.batch_size:
+                self.ready = True
+                return
 
         state = torch.tensor(state, dtype=torch.float32).to(self.device)
         reward = torch.tensor(reward, dtype=torch.float32).to(self.device)
@@ -65,7 +69,7 @@ class RolloutBuffer:
 
         self.lock.acquire()
 
-        self.buffer[self.position] = (state, actions, reward, done, logprob, state_value, mu, log_std)
+        self.buffer[self.position] = (state, actions, reward, done, logprob, state_value, y_t)
 
         self.position = (self.position + 1) % self.capacity
         self.lock.release()
@@ -78,6 +82,7 @@ class RolloutBuffer:
         self.lock.acquire()
         self.buffer = [None] * self.capacity
         self.position = 0
+        self.last_episode_start = 0
         self.total = 0
         self.ready = False
         self.lock.release()
@@ -104,7 +109,7 @@ class RolloutBuffer:
                 yield self._process_batch(batch)
 
     def _process_batch(self, batch):
-        (states, actions, rewards, dones, logprobs, state_values, mus, log_stds, advantages, returns) \
+        (states, actions, rewards, dones, logprobs, state_values, y_t, advantages, returns) \
             = zip(*batch)
 
         states = torch.stack(states).to(self.device)
@@ -113,9 +118,8 @@ class RolloutBuffer:
         dones = torch.stack(dones).to(self.device)
         logprobs = torch.stack(logprobs).to(self.device)
         state_values = torch.stack(state_values).to(self.device)
-        mus = torch.stack(mus).to(self.device)
-        log_stds = torch.stack(log_stds).to(self.device)
+        y_t = torch.stack(y_t).to(self.device)
         advantages = torch.stack(advantages).to(self.device)
         returns = torch.stack(returns).to(self.device)
 
-        return states, actions, rewards, dones, logprobs, state_values, mus, log_stds, advantages, returns
+        return states, actions, rewards, dones, logprobs, state_values, y_t, advantages, returns
