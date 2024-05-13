@@ -33,8 +33,6 @@ class TorchRunningMeanStd:
         self.count = epsilon
 
     def update(self, x):
-        x = torch.tensor(x)
-
         with torch.no_grad():
             batch_mean = torch.mean(x, axis=0)
             batch_var = torch.var(x, axis=0)

@@ -41,7 +41,7 @@ class ActorCritic(nn.Module):
 
         return action.detach(), action_logprob.detach(), state_value.detach(), mu, log_std
 
-    def evaluate(self, state, action, hidden_state=None, cell_state=None, old_mus=None, old_log_stds=None):
+    def evaluate(self, state, action, hidden_state=None, cell_state=None):
         _, probs, (new_hidden_state, new_cell_state), action_mean, _ = \
             self.actor.get_action(state, action, hidden_state, cell_state)
 
@@ -50,7 +50,7 @@ class ActorCritic(nn.Module):
 
         state_values = self.critic(state)
 
-        return logprobs, state_values, dist_entropy, new_hidden_state, new_cell_state, 0
+        return logprobs, state_values, dist_entropy
 
 
 class Actor(nn.Module):
@@ -59,7 +59,7 @@ class Actor(nn.Module):
 
         self.action_dim = action_dim
 
-        self.hidden_dims = 256
+        self.hidden_dims = 512
         self.hidden_dims_halved = int(self.hidden_dims / 2)
 
         self.num_layers = 2
@@ -81,7 +81,8 @@ class Actor(nn.Module):
         self.fc2 = nn.Linear(self.hidden_dims, self.hidden_dims)
         self.fc4 = nn.Linear(self.hidden_dims, self.action_dim)
 
-        self.log_std = nn.Parameter(torch.zeros(1, self.action_dim))
+        # self.log_std = nn.Parameter(torch.zeros(1, self.action_dim))
+        self.log_std = nn.Linear(self.hidden_dims, self.action_dim)
 
         self.init_weights(log_std=log_std)
 
@@ -101,7 +102,7 @@ class Actor(nn.Module):
             hidden_state = torch.zeros(self.num_layers, state.size(0), self.hidden_dims).to(device)
             cell_state = torch.zeros(self.num_layers, state.size(0), self.hidden_dims).to(device)
 
-        x = F.leaky_relu(self.fc0(state[:, :, :18]), 0.01)
+        x = F.leaky_relu(self.fc0(state[:, :, :23]), 0.01)
 
         # Parts of the state gets pre-processed by a separate sequence of linear layers
 
@@ -123,7 +124,7 @@ class Actor(nn.Module):
 
         mu = F.tanh(self.fc4(x))
 
-        log_std = F.softplus(self.log_std)
+        log_std = F.softplus(self.log_std(x))
         log_std = torch.clamp(log_std, -20, 0.45)
 
         return mu, log_std, (hidden_state, cell_state)
@@ -139,13 +140,14 @@ class Actor(nn.Module):
 
         return action, probs, (hidden_state, cell_state), action_mean, log_std
 
+
 class Critic(nn.Module):
     def __init__(self, feature_count, action_dim):
         super(Critic, self).__init__()
 
         self.action_dim = action_dim
 
-        self.hidden_dims = 128
+        self.hidden_dims = 256
         self.hidden_dims_halved = int(self.hidden_dims / 2)
 
         self.fc0 = nn.Linear(feature_count - 128, self.hidden_dims_halved)
@@ -173,20 +175,22 @@ class Critic(nn.Module):
                 nn.init.constant_(param, bias)
 
     def forward(self, state):
-        x = F.leaky_relu(self.fc0(state[:, :, :18]), 0.01)
+        state = state[:, -1, :]
+
+        x = F.leaky_relu(self.fc0(state[:, :23]), 0.01)
 
         # Parts of the state gets pre-processed by a separate sequence of linear layers
 
         # Separate the raycasting data
-        raycasting_data = state[:, :, -128:]  # Last 128 features are raycasting data
+        raycasting_data = state[:, -128:]  # Last 128 features are raycasting data
 
         # Process all raycasting data through the raycasting network
         raycast_out = F.leaky_relu(self.raycast_cnn(raycasting_data), 0.01)
 
         # Concatenate the raycast output with the non-raycasting part of state
-        x = torch.cat((x, raycast_out), dim=2)
+        x = torch.cat((x, raycast_out), dim=1)
 
-        x = F.leaky_relu(self.fc1(x[:, -1, :]), 0.01)
+        x = F.leaky_relu(self.fc1(x), 0.01)
 
         x = F.leaky_relu(self.fc2(x), 0.01)
 

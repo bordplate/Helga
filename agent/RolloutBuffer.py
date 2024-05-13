@@ -30,25 +30,29 @@ class RolloutBuffer:
     def compute_returns_and_advantages(self, last_value, done):
         last_gae_lam = 0
         # Set the value of the next state to zero if the episode ends
-        next_value = 0 if done else last_value
-        next_non_terminal = 1.0 - float(done)  # Convert `done` to float and invert
+        # next_value = 0 if done else last_value
+        next_value = last_value
+        mask = 1.0 - float(done)  # Convert `done` to float and invert
 
         # Reverse iteration over your buffer to calculate advantages and returns
         for step in reversed(range(self.last_episode_start, self.total)):
             if step < self.total - 1:
-                next_non_terminal = 1.0 - self.buffer[step + 1][3].float()
-                next_value = self.buffer[step + 1][5]
+                mask = 1.0 - self.buffer[step + 1][3].float()
+
+            next_value = next_value * mask
+            last_gae_lam = last_gae_lam * mask
 
             # Calculate the delta according to the Bellman equation
-            delta = self.buffer[step][2] + self.gamma * next_value * next_non_terminal - self.buffer[
-                step][5]
+            delta = self.buffer[step][2] + self.gamma * next_value - self.buffer[step][5]
             # Update last_gae_lam using the delta and decay terms
-            last_gae_lam = delta + self.gamma * self.lambda_gae * next_non_terminal * last_gae_lam
+            last_gae_lam = delta + self.gamma * self.lambda_gae * last_gae_lam
             # The return is the value of the state plus the estimated advantage
             _return = last_gae_lam + self.buffer[step][5]
 
             # Replace the original transition with the new one that includes advantage and return
             self.buffer[step] = self.buffer[step] + (last_gae_lam, _return)
+
+            next_value = self.buffer[step][5]
 
         self.last_episode_start = self.total
 

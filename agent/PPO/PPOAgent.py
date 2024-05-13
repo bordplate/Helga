@@ -27,16 +27,19 @@ class PPOAgent:
                  ent_coef=0.01,
                  cl_coeff=0.5,
                  max_grad_norm=0.5,
-                 beta=0.1
+                 beta=0.1,
+                 kl_threshold=0.01,
+                 lambda_gae=0.95
                  ):
         self.gamma = gamma
-        self.lambda_gae = 0.95
         self.eps_clip = eps_clip
         self.K_epochs = K_epochs
         self.ent_coef = ent_coef
         self.cl_coeff = cl_coeff
         self.max_grad_norm = max_grad_norm
         self.beta = beta
+        self.kl_threshold = kl_threshold
+        self.lambda_gae = lambda_gae
 
         self.device = device
 
@@ -74,10 +77,7 @@ class PPOAgent:
 
         return action, action_logprob, state_value, y_t
 
-    def learn(self, buffer: RolloutBuffer):
-        if buffer.total < self.batch_size:
-            return 0
-
+    def learn(self):
         self.policy.train()
         self.policy.actor.train()
         self.policy.critic.train()
@@ -87,53 +87,68 @@ class PPOAgent:
         value_losses = []
         entropy_losses = []
 
+        approx_kls = []
+
         # Optimize policy for K epochs
-        for _ in range(self.K_epochs):
-            for (states, actions, _rewards, dones, old_logprobs, old_state_values,
-                 y_t, advantages, returns) in buffer.get_batches(self.mini_batch_size):
+        for epoch in range(self.K_epochs):
+            for buffer in self.replay_buffers:
+                for (states, actions, _rewards, dones, old_logprobs, old_state_values,
+                     y_t, advantages, returns) in buffer.get_batches(self.mini_batch_size):
 
-                # Evaluating old actions and values
-                logprobs, state_values, dist_entropy, _, _, kl_div = self.policy.evaluate(states, actions, None, None)
-                source_y_t = self.random_encoder(states[:, -1, :].squeeze())
+                    # Evaluating old actions and values
+                    logprobs, state_values, dist_entropy = self.policy.evaluate(states, actions, None, None)
+                    source_y_t = self.random_encoder(states[:, -1, :].squeeze())
 
-                intrinsic_rewards = self.random_encoder.compute_intrinsic_rewards(source_y_t[:, :, 0, 0], y_t.squeeze(), True)
-                intrinsic_rewards = intrinsic_rewards.squeeze().to(device)
+                    # intrinsic_rewards = self.random_encoder.compute_intrinsic_rewards(source_y_t[:, :, 0, 0], y_t.squeeze(), True)
+                    # intrinsic_rewards = intrinsic_rewards.squeeze().to(device)
 
-                advantages = advantages.squeeze()
-                returns = returns.squeeze()
+                    advantages = advantages.squeeze().detach()
+                    returns = returns.squeeze().detach()
 
-                advantages = advantages + self.beta * intrinsic_rewards
-                returns = returns + self.beta * intrinsic_rewards
+                    # advantages = advantages + self.beta * intrinsic_rewards
+                    # returns = returns + self.beta * intrinsic_rewards
 
-                # Finding the ratio (pi_theta / pi_theta__old)
-                ratios = torch.exp(logprobs.mean(dim=1) - old_logprobs.squeeze(dim=1).detach().mean(dim=1))
+                    # Finding the ratio (pi_theta / pi_theta__old)
+                    ratios = torch.exp(logprobs.mean(dim=1) - old_logprobs.squeeze(dim=1).detach().mean(dim=1))
 
-                # Normalizing the advantages
-                advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-6)
+                    # Normalizing the advantages
+                    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-10)
 
-                surr1 = ratios * advantages
-                surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
+                    surr1 = ratios * advantages
+                    surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
 
-                actor_loss = -(torch.min(surr1, surr2)).mean()
-                critic_loss = self.mse_loss(returns.squeeze(), state_values.squeeze())
+                    actor_loss = -(torch.min(surr1, surr2)).mean()
+                    critic_loss = self.mse_loss(state_values.squeeze(), returns.squeeze())
 
-                policy_losses.append(actor_loss.item())
-                value_losses.append(critic_loss.item())
+                    policy_losses.append(actor_loss.item())
+                    value_losses.append(critic_loss.item())
 
-                entropy_loss = dist_entropy.sum(dim=1).mean()
-                entropy_losses.append(entropy_loss.item())
+                    entropy_loss = dist_entropy.sum(dim=1).mean()
+                    entropy_losses.append(entropy_loss.item())
 
-                loss = actor_loss - self.ent_coef * entropy_loss + self.cl_coeff * critic_loss
+                    approx_kl = (old_logprobs.squeeze() - logprobs).mean()
+                    approx_kls.append(approx_kl.item())
 
-                self.optimizer.zero_grad()
-                loss.backward()
-                losses.append(loss.item())
+                    loss = actor_loss - self.ent_coef * entropy_loss + self.cl_coeff * critic_loss
 
-                # Clip the gradients
-                nn.utils.clip_grad_norm_(self.policy.actor.parameters(), self.max_grad_norm)
-                self.optimizer.step()
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    losses.append(loss.item())
 
-        buffer.clear()
+                    # Clip the gradients
+                    nn.utils.clip_grad_norm_(self.policy.actor.parameters(), self.max_grad_norm)
+                    self.optimizer.step()
+
+                # Stop early if kl_divergence is above threshold
+                if np.mean(approx_kls) > self.kl_threshold:
+                    print(f"Stopping early in {epoch} due to high KL divergence: {np.mean(approx_kls)}")
+                    break
+
+                buffer.clear()
+
+            # Stop early if kl_divergence is above threshold
+            if np.mean(approx_kls) > self.kl_threshold:
+                break
 
         return (np.mean(losses) if len(losses) > 0 else 0,
                 np.mean(policy_losses) if len(policy_losses) > 0 else 0,

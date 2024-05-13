@@ -28,6 +28,9 @@ class RedisHub:
         self.latest_model = 0
         self.model = None
 
+        self.pubsub = None
+        self.buffer_full = False
+
         # Randomly generate worker ID
         self.worker_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
@@ -83,13 +86,14 @@ class RedisHub:
         if self.model is None:
             self.model = pickle.dumps(agent.policy.state_dict())
 
+        self.model = pickle.dumps(agent.policy.state_dict())
         optimizer = pickle.dumps(agent.optimizer.state_dict())
 
         self.redis.set("rac1.fitness-course.model", self.model)
         self.redis.set("rac1.fitness-course.optimizer", optimizer)
         self.redis.set("rac1.fitness-course.model_timestamp", time.time())
 
-        self.model = pickle.dumps(agent.policy.state_dict())
+
 
     def save_model_to_file(self, agent: PPOAgent, filename):
             torch.save({
@@ -122,6 +126,22 @@ class RedisHub:
                 agent.optimizer.load_state_dict(existing_optimizer)
 
             print("Loaded existing model from Redis")
+
+            return True
+
+        return False
+
+    def check_buffer_full(self):
+        if self.pubsub is None:
+            self.pubsub = self.redis.pubsub()
+            self.pubsub.subscribe(f"{self.worker_id}.full")
+
+        message = self.pubsub.get_message(ignore_subscribe_messages=True)
+
+        if message is not None:
+            self.buffer_full = True if message["data"].decode() == "True" else False
+
+        return self.buffer_full
 
     def listen_for_messages(self, agent: PPOAgent):
         # Subscribe to the "replay_buffer" channel
@@ -180,6 +200,11 @@ class RedisHub:
                             transition.state_value,
                             transition.y_t,
                         )
+
+                        # If the replay buffer is full, we need to notify the worker to stop sending messages
+                        if replay_buffer.ready:
+                            self.redis.publish(f"{data.worker_name}.full", "True")
+
         except IndexError as e:
             print(e)
 

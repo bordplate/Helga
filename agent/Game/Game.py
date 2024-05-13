@@ -1,4 +1,5 @@
 import ctypes
+import math
 
 from Game.Process import Process
 
@@ -14,6 +15,20 @@ class Vector3(ctypes.Structure):
 
     def distance_to(self, other):
         return ((self.x - other.x) ** 2 + (self.y - other.y) ** 2 + (self.z - other.z) ** 2) ** 0.5
+
+    def angle(self):
+        return math.atan2(self.y, self.x)
+
+    def angle_to(self, other):
+        return (other - self).angle()
+
+    def is_looking_at(self, rotation, other, angle_threshold=0.1) -> bool:
+        # Calculate the angle between the player's forward vector and the vector to the other object
+        angle = self.angle_to(other)
+        return abs(angle - rotation.z) < angle_threshold
+
+    def __sub__(self, other):
+        return Vector3(self.x - other.x, self.y - other.y, self.z - other.z)
 
 
 class Game:

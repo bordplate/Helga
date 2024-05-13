@@ -1,4 +1,9 @@
 import pygame
+import numpy as np
+import matplotlib.pyplot as plt
+from collections import deque
+
+from matplotlib.animation import FuncAnimation
 
 
 # Pygame setup
@@ -31,25 +36,38 @@ font = pygame.font.Font(None, 24)
 
 def draw_state_value_face(state_value):
     """
-    Draw a face that represents the state value, happy for positive and sad for negative from -2 to 2.
+    Draw a face that represents the state value, happy for positive and sad for negative from 1 - 5.
     There are 5 images in total, each representing a different state value.
 
     Picks an image from ./imgs/face_{state_value}.png
     """
-    state_value = max(-2, min(2, state_value))
+    screen.fill((0, 0, 255))
 
-    face_value = int((state_value + 2) / 4 * 5)
+    if abs(state_value) > 5:
+        face_value = 0
+    else:
+        state_value = max(-1.9, min(1.9, state_value))
 
-    face_img = pygame.image.load(f"imgs/face_{face_value}.png")
-    face_img = pygame.transform.scale(face_img, (screen_width, face_height))
+        face_value = 3
+
+        if state_value > 0.5:
+            face_value = 4
+        if state_value > 1.8:
+            face_value = 5
+        if state_value < -0.5:
+            face_value = 2
+        if state_value < -1.8:
+            face_value = 1
+
+    face_img = pygame.image.load(f"imgs/state-{face_value}.png")
+    face_img = pygame.transform.scale(face_img, (face_height, face_height))
 
     screen.blit(face_img, (0, bar_height))
 
-    pygame.display.flip()
+    # pygame.display.flip()
 
 
 def draw_bars(actions, state_value, progress):
-    screen.fill((0, 0, 0))
     for i, action in enumerate(actions):
         # Clip action to -1 and 1
         action = max(-1, min(1, action))

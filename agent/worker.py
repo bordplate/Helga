@@ -1,3 +1,5 @@
+import time
+
 import torch
 
 from Watchdog import Watchdog
@@ -9,7 +11,7 @@ from PPO.PPOAgent import PPOAgent
 
 from RedisHub import RedisHub
 
-features = 18 + 128
+features = 23 + 128
 sequence_length = 8
 
 configuration = {
@@ -41,6 +43,8 @@ def start_worker(args):
     if eval_mode:
         # Draws a visualization of the actions and other information
         import Visualizer
+        import Plotter
+        Plotter.start_plotting()
 
     # Agent that we will use only for inference, learning related parameters are not used
     agent = PPOAgent(features, 7, log_std=-0.5)
@@ -62,8 +66,14 @@ def start_worker(args):
 
         last_done = True
 
+        must_check_new_model = False
+
         while True:
-            if steps % 5 == 0:
+            while redis.check_buffer_full():
+                must_check_new_model = True
+                time.sleep(0.1)
+
+            if steps % 5 == 0 or must_check_new_model:
                 new_model = redis.get_new_model()
                 if new_model is not None:
                     agent.load_policy_dict(new_model)
@@ -79,7 +89,10 @@ def start_worker(args):
                 redis.add(state_sequence, actions, reward, last_done, logprob, state_value, y_t)
             else:
                 # Visualize the actions
+                Visualizer.draw_state_value_face(state_value)
                 Visualizer.draw_bars(actions, state_value, time_left/30)
+
+                Plotter.add_data(state_value.item(), reward)
 
             # Roll the state sequence and append the new normalized state
             new_state_sequence = np.roll(state_sequence, -1, axis=0)

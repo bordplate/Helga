@@ -8,6 +8,8 @@ from .RatchetEnvironment import RatchetEnvironment
 
 class FitnessCourseEnvironment(RatchetEnvironment):
     def __init__(self, process_name="rpcs3.exe", eval_mode=False):
+        super().__init__()
+
         self.game = RC1Game(process_name=process_name)
 
         self.checkpoints_template = [
@@ -22,6 +24,35 @@ class FitnessCourseEnvironment(RatchetEnvironment):
             Vector3(117, 86, 66),
             Vector3(136, 114, 70),
             Vector3(201, 128, 50),
+            Vector3(269.9619445800781, 143.47598266601562, 50.0),
+            Vector3(269.9619445800781, 143.47598266601562, 50.0),
+            Vector3(298.1654052734375, 143.35801696777344, 48.0625),
+            Vector3(301.29742431640625, 178.26695251464844, 45.689918518066406),
+            Vector3(265.7449035644531, 195.6828155517578, 46.0),
+            Vector3(228.53050231933594, 203.75091552734375, 46.25),
+            Vector3(233.90478515625, 239.93067932128906, 36.0),
+            Vector3(293.2232971191406, 244.1248321533203, 34.5),
+            Vector3(320.4754943847656, 240.56504821777344, 42.0),
+            Vector3(339.72320556640625, 243.81422424316406, 60.0),
+            Vector3(329.45880126953125, 282.32977294921875, 47.75),
+            Vector3(308.2227783203125, 302.4566650390625, 75.015625),
+            Vector3(261.9341125488281, 349.85101318359375, 75.203125),
+            Vector3(247.73629760742188, 374.39923095703125, 85.03430938720703),
+            Vector3(262.2768249511719, 375.6791076660156, 87.02777099609375),
+            Vector3(280.4011535644531, 392.7554016113281, 88.98082733154297),
+            Vector3(247.2918243408203, 375.9893493652344, 85.04957580566406),
+            Vector3(264.1728515625, 345.2733154296875, 75.0),
+            Vector3(308.86572265625, 299.5409240722656, 75.015625),
+            Vector3(326.81341552734375, 279.9330749511719, 47.75),
+            Vector3(307.574951171875, 244.40528869628906, 34.0),
+            Vector3(239.2870635986328, 244.0665740966797, 36.0),
+            Vector3(228.46156311035156, 195.80406188964844, 46.0),
+            Vector3(278.11517333984375, 195.728759765625, 45.89271545410156),
+            Vector3(302.5223693847656, 146.34388732910156, 48.0625),
+        ]
+
+        self.more_checkpoints = [
+
         ]
 
         # [x, y] bounds of the level
@@ -53,8 +84,6 @@ class FitnessCourseEnvironment(RatchetEnvironment):
 
         self.frames_moving_away_from_checkpoint = 0
 
-        self.reward_counters = {}
-
     def reset(self):
         # Check that we've landed on the right level yet
         while self.game.get_current_level() != 3:
@@ -79,25 +108,6 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         self.time_since_last_checkpoint = 0
         self.closest_distance_to_checkpoint = 999999
 
-        self.reward_counters = {
-            'rewards/timeout_penalty': 0,
-            'rewards/jump_penalty': 0,
-            'rewards/distance_from_checkpoint_reward': 0,
-            'rewards/distance_from_checkpoint_penalty': 0,
-            'rewards/speed_reward': 0,
-            'rewards/distance_traveled_reward': 0,
-            'rewards/height_loss_penalty': 0,
-            'rewards/death_penalty': 0,
-            'rewards/crash_penalty': 0,
-            'rewards/wall_crash_penalty': 0,
-            'rewards/tnt_crash_penalty': 0,
-            'rewards/void_penalty': 0,
-            'rewards/stall_penalty': 0,
-            'rewards/reached_checkpoint_reward': 0,
-            'rewards/facing_checkpoint_reward': 0,
-            'rewards/rotating_to_face_checkpoint_reward': 0,
-        }
-
         # Create checkpoints from self.checkpoint_template and jitter them slightly to make them harder to memorize
         self.checkpoints = []
         for checkpoint in self.checkpoints_template:
@@ -114,7 +124,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         spawn_position = Vector3(259, 143, 49.5)
 
         # 70% chance to spawn at random checkpoint, 30% in evaluation mode
-        if np.random.rand() < (0.7 if not self.eval_mode else 0.3):
+        if np.random.rand() < (0.7 if not self.eval_mode else 0.25):
             checkpoint = np.random.randint(0, len(self.checkpoints))
             spawn_position = self.checkpoints_template[checkpoint]
             self.checkpoint = (checkpoint + 1) % len(self.checkpoints)
@@ -191,22 +201,25 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         # Frame advance the game
         if not self.game.frame_advance() or not self.game.frame_advance():
             # If we can't frame advance, the game has probably crashed
-            reward -= 1.0
-            self.reward_counters['rewards/crash_penalty'] += 1
             terminal = True
+            reward += self.reward("crash_penalty", -1.0)
 
         if death_count != self.game.get_death_count():
             terminal = True
-            self.reward_counters['rewards/death_penalty'] += 5.0
-            reward -= 5.0
+            reward += self.reward("death_penalty", -5.0)
 
         # Get updated player info
+        looking_at_checkpoint = self.game.get_camera_position().is_looking_at(self.game.get_camera_rotation(), checkpoint_position)
         position = self.game.get_player_position()
         player_rotation = self.game.get_player_rotation()
         distance_from_ground = self.game.get_distance_from_ground()
         speed = self.game.get_player_speed()
         player_state = self.game.get_player_state()
         distance_delta = position.distance_to_2d(pre_player_position)
+
+        # Give reward for looking towards the checkpoint
+        if looking_at_checkpoint:
+            reward += self.reward("looking_at_checkpoint", 0.2)
 
         # Calculate new distances, deltas and differences
         check_delta_x, check_delta_y, check_delta_z = (
@@ -228,11 +241,11 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         distance_from_checkpoint = self.game.get_player_position().distance_to(checkpoint_position)
 
         # Check that the player is within the bounds of the level
-        if position.x < self.bounds[0][0] or position.y > self.bounds[0][1] or \
-                position.x > self.bounds[1][0] or position.y < self.bounds[1][1]:
-            terminal = True
-            self.reward_counters['rewards/void_penalty'] += 1
-            reward -= 1.0
+        # if position.x < self.bounds[0][0] or position.y > self.bounds[0][1] or \
+        #         position.x > self.bounds[1][0] or position.y < self.bounds[1][1]:
+        #     terminal = True
+        #     self.reward_counters['rewards/void_penalty'] += 1
+        #     reward -= 1.0
 
         if distance_from_checkpoint < pre_distance_from_checkpoint:
             self.frames_moving_away_from_checkpoint -= 2
@@ -246,9 +259,8 @@ class FitnessCourseEnvironment(RatchetEnvironment):
 
         if distance_from_checkpoint < pre_distance_from_checkpoint and distance_from_checkpoint < self.closest_distance_to_checkpoint:
             dist = pre_distance_from_checkpoint - distance_from_checkpoint
-            if dist < 2 and dist > 0.01:
-                self.reward_counters['rewards/distance_from_checkpoint_reward'] += (pre_distance_from_checkpoint - distance_from_checkpoint) * 1.2
-                reward += (pre_distance_from_checkpoint - distance_from_checkpoint) * 1.2
+            if dist < 10 and dist > 0.01:
+                reward += self.reward("distance_from_checkpoint_reward", (pre_distance_from_checkpoint - distance_from_checkpoint) * 10)
 
                 self.frames_moving_away_from_checkpoint = 0
         # elif distance_from_checkpoint < pre_distance_from_checkpoint:
@@ -271,8 +283,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
             if self.checkpoint >= len(self.checkpoints):
                 self.checkpoint = 0
 
-            self.reward_counters['rewards/reached_checkpoint_reward'] += 6.0  # * self.n_checkpoints
-            reward += 6.0  # * self.n_checkpoints
+            reward += self.reward("reached_checkpoint_reward", 10.0)
 
             checkpoint_position = self.checkpoints[self.checkpoint]
             distance_from_checkpoint = self.game.get_player_position().distance_to(checkpoint_position)
@@ -280,26 +291,24 @@ class FitnessCourseEnvironment(RatchetEnvironment):
             self.closest_distance_to_checkpoint = distance_from_checkpoint
 
         if distance_from_checkpoint > self.closest_distance_to_checkpoint + 10:
-            # self.reward_counters['rewards/distance_from_checkpoint_penalty'] += 0.02
-            reward -= 0.05
+            reward += self.reward("moving_away_from_checkpoint_penalty", -0.5)
 
         # Various speed related rewards and penalties
 
         # Check that the agent hasn't stopped progressing
         if self.time_since_last_checkpoint > 30 * 30:  # 30 in-game seconds
             terminal = True
-            self.reward_counters['rewards/timeout_penalty'] += 1
-            reward -= 2.0
+            reward += self.reward("timeout_penalty", -2.0)
 
         # Discourage standing still
-        if distance_delta <= 0.01 and self.timer > 30 * 5:
-            if self.stalled_timer > 30:
-                self.reward_counters['rewards/stall_penalty'] += 0.05
-                reward -= 0.1
-
-            self.stalled_timer += 1
-        else:
-            self.stalled_timer = 0
+        # if distance_delta <= 0.01 and self.timer > 30 * 5:
+        #     if self.stalled_timer > 30:
+        #         self.reward_counters['rewards/stall_penalty'] += 0.05
+        #         reward -= 0.1
+        #
+        #     self.stalled_timer += 1
+        # else:
+        #     self.stalled_timer = 0
 
         # Check that agent is facing a checkpoint by calculating angle between player and checkpoint
         angle = np.arctan2(checkpoint_position.y - position.y, checkpoint_position.x - position.x) - player_rotation.z
@@ -330,6 +339,8 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         self.distance_from_checkpoint_per_step.append(distance_from_checkpoint)
 
         # Penalize various collisions
+        camera_pos = self.game.get_camera_position()
+        camera_rot = self.game.get_camera_rotation()
 
         # Build observation state
         state = [
@@ -337,25 +348,34 @@ class FitnessCourseEnvironment(RatchetEnvironment):
             np.interp(position.x, (0, 500), (-1, 1)),  # 0
             np.interp(position.y, (0, 500), (-1, 1)),  # 1
             np.interp(position.z, (-150, 150), (-1, 1)),  # 2
+            np.interp(player_rotation.z, (-4, 4), (-1, 1)),  # 3
+
+            np.interp(camera_pos.x, (0, 500), (-1, 1)),  # 4
+            np.interp(camera_pos.y, (0, 500), (-1, 1)),  # 5
+            np.interp(camera_pos.z, (-150, 150), (-1, 1)),  # 6
+            np.interp(camera_rot.z, (-4, 4), (-1, 1)),  # 7
+
             # Checkpoints
-            np.interp(checkpoint_position.x, (0, 500), (-1, 1)),  # 3
-            np.interp(checkpoint_position.y, (0, 500), (-1, 1)),  # 4
-            np.interp(checkpoint_position.z, (-150, 150), (-1, 1)),  # 5
-            check_diff_x,  # 6
-            check_diff_y,  # 7
-            check_diff_z,  # 8
+            np.interp(checkpoint_position.x, (0, 500), (-1, 1)),  # 8
+            np.interp(checkpoint_position.y, (0, 500), (-1, 1)),  # 9
+            np.interp(checkpoint_position.z, (-150, 150), (-1, 1)),  # 10
+            check_diff_x,  # 11
+            check_diff_y,  # 12
+            check_diff_z,  # 13
+
+            np.interp(distance_from_checkpoint, (0, 500), (-1, 1)),  # 14
+            np.interp(self.closest_distance_to_checkpoint, (0, 500), (-1, 1)),  # 15
+
             # Player data
-            np.interp(player_rotation.z, (-20, 20), (-1, 1)),  # 9
-            np.interp(distance_from_ground, (-64, 64), (-1, 1)),  # 10
-            np.interp(speed, (0, 2), (-1, 1)),  # 11
-            np.interp(distance_from_checkpoint, (0, 500), (-1, 1)),  # 12
-            np.interp(player_state, (0, 255), (-1, 1)),  # 13
+            np.interp(distance_from_ground, (-64, 64), (-1, 1)),  # 16
+            np.interp(speed, (0, 2), (-1, 1)),  # 17
+            np.interp(player_state, (0, 255), (-1, 1)),  # 18
 
             # Joystick
-            self.game.joystick_l_x,  # 14
-            self.game.joystick_l_y,  # 15
-            self.game.joystick_r_x,  # 16
-            self.game.joystick_r_y,  # 17
+            self.game.joystick_l_x,  # 19
+            self.game.joystick_l_y,  # 20
+            self.game.joystick_r_x,  # 21
+            self.game.joystick_r_y,  # 22
 
             # Collision data
             *self.game.get_collisions()  # 64 collisions + 64 classes

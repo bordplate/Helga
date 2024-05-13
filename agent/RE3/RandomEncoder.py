@@ -43,7 +43,7 @@ class RandomEncoder(nn.Module):
 
         normalized_entropy = entropies / self.ent_stats.std
 
-        return np.log(normalized_entropy + 1.0)
+        return torch.log(normalized_entropy + 1.0)
 
     def compute_intrinsic_rewards(self, source_y_t, target_y_t, average_entropy=False):
         """
@@ -77,4 +77,4 @@ class RandomEncoder(nn.Module):
 
             state_entropy = knn_dists
 
-            return self.normalize_entropies(np.float32(state_entropy.to('cpu')))
+            return self.normalize_entropies(state_entropy.to('cpu'))

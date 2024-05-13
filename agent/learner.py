@@ -13,17 +13,21 @@ from util import update_graph_html
 
 
 class Config:
-    learning_rate       = 5e-5
-    features            = 18 + 128
-    actions             = 7
-    batch_size          = 1024 * 8
-    mini_batch_size     = 1024
-    sequence_length     = 8
+    learning_rate_actor     = 5e-6
+    learning_rate_critic    = 1e-5
+    features                = 23 + 128
+    actions                 = 7
+    batch_size              = 1024 * 8
+    mini_batch_size         = 1024 * 2
+    sequence_length         = 8
 
-    gamma = 0.99
-    K_epochs = 10
-    eps_clip = 0.2
-    log_std = -0.5
+    gamma                   = 0.99
+    K_epochs                = 5
+    eps_clip                = 0.2
+    log_std                 = -1.0
+    ent_coef                = 0.01
+    lambda_gae              = 0.95
+    critic_loss_coeff       = 1
 
     @staticmethod
     def serialize():
@@ -40,14 +44,17 @@ def start(args):
     agent = PPOAgent(
         Config.features,
         Config.actions,
-        Config.learning_rate,
-        Config.learning_rate,
+        Config.learning_rate_actor,
+        Config.learning_rate_critic,
         Config.batch_size,
         Config.mini_batch_size,
         Config.gamma,
         Config.K_epochs,
         Config.eps_clip,
-        Config.log_std
+        Config.log_std,
+        Config.ent_coef,
+        cl_coeff=Config.critic_loss_coeff,
+        lambda_gae=Config.lambda_gae,
     )
 
     # Load existing model if load_model is set
@@ -59,7 +66,11 @@ def start(args):
         redis.save_model(agent)
     else:
         # Restores model from Redis if it exists
-        redis.restore_model(agent)
+        if not redis.restore_model(agent):
+            print("No existing model found in Redis")
+
+            # Save our current model to Redis
+            redis.save_model(agent)
 
     if args.wandb:
         current_run_id = redis.redis.get("rac1.fitness-course.wandb_run_id")
@@ -88,27 +99,26 @@ def start(args):
     steps = 0
 
     print("Starting training loop...")
-    n_processed = 0
 
     while True:
         processed = False
 
         print("\r", end="")
+
+        all_buffers_ready = all([replay_buffer.ready for replay_buffer in agent.replay_buffers])
+
         for i, replay_buffer in enumerate(agent.replay_buffers):
             print(f"[{i}:{replay_buffer.total}]", end="")
 
-            if replay_buffer.ready:
-                n_processed += replay_buffer.total
+        if all_buffers_ready and len(agent.replay_buffers) > 0:
+            loss, policy_loss, value_loss, entropy_loss = agent.learn()
 
-                loss, policy_loss, value_loss, entropy_loss = agent.learn(replay_buffer)
+            losses.append(loss)
+            policy_losses.append(policy_loss)
+            value_losses.append(value_loss)
+            entropy_losses.append(entropy_loss)
 
-                losses.append(loss)
-                policy_losses.append(policy_loss)
-                value_losses.append(value_loss)
-                entropy_losses.append(entropy_loss)
-
-                processed = True
-                break
+            processed = True
 
         if not processed:
             time.sleep(0.1)
@@ -118,6 +128,13 @@ def start(args):
 
         if commit:
             redis.save_model(agent)
+
+            # Clear the buffers
+            for replay_buffer in agent.replay_buffers:
+                replay_buffer.clear()
+
+                # Notify workers
+                redis.redis.publish(f"{replay_buffer.owner}.full", "False")
 
         # Updating model in Redis, log stuff for debub, make backups
         if steps % 1 == 0:
@@ -137,8 +154,8 @@ def start(args):
                       'entropy_loss: %.2f' % np.mean(entropy_losses[-100:])
                 )
 
-                log_std_params = [ "%.5f" % x for x in agent.policy.actor.log_std.squeeze().tolist() ]
-                print(f"log_std: {log_std_params}")
+                # log_std_params = [ "%.5f" % x for x in agent.policy.actor.log_std.squeeze().tolist() ]
+                # print(f"log_std: {log_std_params}")
 
             # Save the model every 15 steps
             if commit and steps % 15 == 0:

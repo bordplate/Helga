@@ -42,6 +42,9 @@ class RC1Game(Game):
     coll_class_left_address = 0xB00048
     coll_class_right_address = 0xB0004c
 
+    camera_position_address = 0x951500
+    camera_rotation_address = 0x951510
+
     death_count_address = 0xB00500
 
     joystick_l_x = 0.0
@@ -184,6 +187,38 @@ class RC1Game(Game):
         ctypes.memmove(ctypes.byref(player_rotation), player_rotation_buffer, ctypes.sizeof(player_rotation))
 
         return player_rotation
+
+    def get_camera_position(self) -> Vector3:
+        camera_position_buffer = self.process.read_memory(self.camera_position_address, 12)
+
+        if camera_position_buffer is None:
+            return Vector3()
+
+        # Flip each 4 bytes to convert from big endian to little endian
+        camera_position_buffer = (camera_position_buffer[3::-1] +
+                                  camera_position_buffer[7:3:-1] +
+                                  camera_position_buffer[11:7:-1])
+
+        camera_position = Vector3()
+        ctypes.memmove(ctypes.byref(camera_position), camera_position_buffer, ctypes.sizeof(camera_position))
+
+        return camera_position
+
+    def get_camera_rotation(self) -> Vector3:
+        camera_rotation_buffer = self.process.read_memory(self.camera_rotation_address, 12)
+
+        if camera_rotation_buffer is None:
+            return Vector3()
+
+        # Flip each 4 bytes to convert from big endian to little endian
+        camera_rotation_buffer = (camera_rotation_buffer[3::-1] +
+                                  camera_rotation_buffer[7:3:-1] +
+                                  camera_rotation_buffer[11:7:-1])
+
+        camera_rotation = Vector3()
+        ctypes.memmove(ctypes.byref(camera_rotation), camera_rotation_buffer, ctypes.sizeof(camera_rotation))
+
+        return camera_rotation
 
     def get_collisions(self, normalized=True):
         collisions = []
