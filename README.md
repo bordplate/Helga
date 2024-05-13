@@ -40,3 +40,6 @@ You can use Weights and Biases to track your training progress. Just follow thei
 until you're logged in. 
 
 Add `--wandb` to the command line arguments to enable Weights and Biases tracking.
+
+## Contributors
+@davubnub on Discord for the Ratchet faces
