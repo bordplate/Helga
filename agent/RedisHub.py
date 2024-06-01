@@ -16,7 +16,7 @@ from RolloutBuffer import RolloutBuffer
 
 
 Transition = namedtuple('Transition', ('state', 'action', 'reward',
-                                       'done',  'logprob', 'state_value', 'y_t'))
+                                       'done',  'logprob', 'state_value'))
 TransitionMessage = namedtuple('TransitionMessage', ('transition', 'worker_name'))
 
 
@@ -34,8 +34,8 @@ class RedisHub:
         # Randomly generate worker ID
         self.worker_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
-    def add(self, state_sequence, actions, reward, last_done, logprob, state_value, y_t):
-        transition = Transition(state_sequence, actions, reward, last_done, logprob, state_value, y_t)
+    def add(self, state_sequence, actions, reward, last_done, logprob, state_value):
+        transition = Transition(state_sequence, actions, reward, last_done, logprob, state_value)
         message = TransitionMessage(transition, self.worker_id)
 
         # Pickle the transition and publish it to the "replay_buffer" channel
@@ -86,14 +86,12 @@ class RedisHub:
         if self.model is None:
             self.model = pickle.dumps(agent.policy.state_dict())
 
-        self.model = pickle.dumps(agent.policy.state_dict())
         optimizer = pickle.dumps(agent.optimizer.state_dict())
+        self.model = pickle.dumps(agent.policy.state_dict())
 
         self.redis.set("rac1.fitness-course.model", self.model)
         self.redis.set("rac1.fitness-course.optimizer", optimizer)
         self.redis.set("rac1.fitness-course.model_timestamp", time.time())
-
-
 
     def save_model_to_file(self, agent: PPOAgent, filename):
             torch.save({
@@ -142,6 +140,16 @@ class RedisHub:
             self.buffer_full = True if message["data"].decode() == "True" else False
 
         return self.buffer_full
+
+    def get_action_mask(self):
+        mask = self.redis.get("rac1.fitness-course.action_mask")
+        if mask is not None:
+            return torch.tensor(pickle.loads(mask), dtype=torch.float32).to('cuda')
+
+        return None
+
+    def set_action_mask(self, mask):
+        self.redis.set("rac1.fitness-course.action_mask", pickle.dumps(mask))
 
     def listen_for_messages(self, agent: PPOAgent):
         # Subscribe to the "replay_buffer" channel
@@ -197,8 +205,7 @@ class RedisHub:
                             transition.reward,
                             transition.done,
                             transition.logprob,
-                            transition.state_value,
-                            transition.y_t,
+                            transition.state_value
                         )
 
                         # If the replay buffer is full, we need to notify the worker to stop sending messages

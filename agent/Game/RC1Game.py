@@ -28,7 +28,10 @@ class RC1Game(Game):
     collisions_address = 0xB00100
     collisions_class_address = 0xB00200
 
-    oscillation_offset_address = 0xB00060
+    oscillation_offset_x_address = 0xB00060
+    oscillation_offset_y_address = 0xB00064
+
+    should_render_address = 0xB00030
 
     coll_forward_address = 0xB00030
     coll_up_address = 0xB00034
@@ -45,6 +48,8 @@ class RC1Game(Game):
     camera_position_address = 0x951500
     camera_rotation_address = 0x951510
 
+    checkpoint_position_address = 0xb00400
+
     death_count_address = 0xB00500
 
     joystick_l_x = 0.0
@@ -57,13 +62,30 @@ class RC1Game(Game):
 
         self.game_key = "rc1"
 
+        self.collisions_render = np.zeros((8*4, 8*4))
+
+        # Init mobys_render as -1
+        self.mobys_render = np.zeros((8*4, 8*4))
+        self.mobys_render.fill(-1)
+
     def set_controller_input(self, controller_input, left_joy_x, left_joy_y, right_joy_x, right_joy_y):
         self.process.write_int(self.input_address, controller_input)
 
-        self.joystick_l_x = max(-1.0, min(1.0, left_joy_x))
-        self.joystick_l_y = max(-1.0, min(1.0, left_joy_y))
-        self.joystick_r_x = max(-1.0, min(1.0, right_joy_x))
-        self.joystick_r_y = max(-1.0, min(1.0, right_joy_y))
+        # self.joystick_l_x += left_joy_x
+        # self.joystick_l_y += left_joy_y
+        # self.joystick_r_x += right_joy_x
+        # self.joystick_r_y += right_joy_y
+
+        self.joystick_l_x = left_joy_x
+        self.joystick_l_y = left_joy_y
+        self.joystick_r_x = right_joy_x
+        self.joystick_r_y = right_joy_y
+
+        # Clamp all the joystick values between -1 and 1
+        self.joystick_l_x = np.clip(self.joystick_l_x, -1, 1)
+        self.joystick_l_y = np.clip(self.joystick_l_y, -1, 1)
+        self.joystick_r_x = np.clip(self.joystick_r_x, -1, 1)
+        self.joystick_r_y = np.clip(self.joystick_r_y, -1, 1)
 
         joystick = 0
 
@@ -244,8 +266,39 @@ class RC1Game(Game):
 
         return [*collisions, *classes]
 
+    def get_collisions_oscillated(self, normalized=True):
+        collisions = []
+        classes = []
+
+        # 8 rows, 8 columns
+        for i in range(8):
+            for j in range(8):
+                offset = 4 * (i * 8 + j)
+
+                collision_address = self.collisions_address + offset
+                collision_value = self.process.read_float(collision_address)
+
+                class_address = self.collisions_class_address + offset
+                class_value = self.process.read_int(class_address)
+
+                if normalized:
+                    collision_value = np.interp(collision_value, [-32, 64], [-1, 1])
+                    class_value = np.interp(class_value, [-2, 4096], [-1, 1])
+
+                (oscillation_offset_x, oscillation_offset_y) = self.get_oscillation_offset()
+
+                x_index = int(i * 4 + oscillation_offset_x)
+                y_index = int(j * 4 + oscillation_offset_y)
+
+                self.collisions_render[x_index, y_index] = collision_value
+                self.mobys_render[x_index, y_index] = class_value
+
+        # Flatten and return self.collisions_render and self.mobys_render
+        return [*self.collisions_render.copy().flatten(), *self.mobys_render.copy().flatten()]
+
     def get_oscillation_offset(self):
-        return self.process.read_float(self.oscillation_offset_address)
+        return (int(self.process.read_float(self.oscillation_offset_x_address)),
+                (self.process.read_float(self.oscillation_offset_y_address)))
 
     def get_collisions_old(self):
         coll_forward = self.process.read_float(self.coll_forward_address)
@@ -275,6 +328,18 @@ class RC1Game(Game):
         self.process.write_byte(hoverboard_lady_ptr + 0x20, 3)
         self.process.write_byte(hoverboard_lady_ptr + 0xbc, 3)
 
+    def set_checkpoint_position(self, position: Vector3):
+        position_x = struct.pack('>f', position.x)
+        position_y = struct.pack('>f', position.y)
+        position_z = struct.pack('>f', position.z)
+
+        self.process.write_memory(self.checkpoint_position_address, position_x)
+        self.process.write_memory(self.checkpoint_position_address + 4, position_y)
+        self.process.write_memory(self.checkpoint_position_address + 8, position_z)
+
+    def set_should_render(self, should_render):
+        self.process.write_int(self.should_render_address, 1 if should_render else 0)
+
     def frame_advance(self):
         frame_count = self.get_current_frame_count()
 
@@ -287,6 +352,8 @@ class RC1Game(Game):
             frame_count = self.get_current_frame_count()
 
         self.last_frame_count = frame_count
+
+        self.get_collisions_oscillated(normalized=False)
 
         self.process.write_int(self.frame_progress_address, frame_count)
 

@@ -177,6 +177,15 @@ void unlock_level(int level) {
     SHK_CALL_HOOK(_unlock_level, level);
 }
 
+SHK_HOOK(void, some_rendering_func);
+void some_rendering_func_hook() {
+    if (should_render == 0) {
+        return;
+    }
+
+    SHK_CALL_HOOK(some_rendering_func);
+}
+
 #define remote_pressed_buttons *((int*)0xB00008)
 #define last_remote_pressed_buttons *((int*)0xB0000C)
 #define remote_joysticks *((int*)0xB00010)
@@ -233,6 +242,7 @@ void rc1_init() {
     SHK_BIND_HOOK(_unlock_item, _unlock_item_hook);
     SHK_BIND_HOOK(_unlock_level, _unlock_level_hook);
     SHK_BIND_HOOK(cellPadGetDataRedirect, cellPadGetDataRedirectHook);
+    SHK_BIND_HOOK(some_rendering_func, some_rendering_func_hook);
 
     MULTI_LOG("Bound hooks\n");
 }

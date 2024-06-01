@@ -59,7 +59,7 @@ class Watchdog:
         while True:
             self.last_frame_count_time += 1
 
-            if self.last_frame_count == self.env.last_frame_count and self.last_frame_count_time > 60:
+            if self.last_frame_count == self.env.last_frame_count and self.last_frame_count_time > 60 and False:  # Disabled
                 # RPCS3 has likely crashed, restart it
                 print("Watchdog: Environment has stalled, restarting it...")
 

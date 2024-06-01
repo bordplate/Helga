@@ -46,7 +46,11 @@ private:
 
     Moby* camera_moby;
 
-    bool oscillation_direction;
+    Moby* checkpoint_moby;
+    float checkpoint_bounce_z;
+
+    bool oscillation_direction_x;
+    bool oscillation_direction_y;
 };
 
 

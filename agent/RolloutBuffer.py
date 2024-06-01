@@ -18,6 +18,7 @@ class RolloutBuffer:
         self.new_samples = 0
         self.gamma = gamma
         self.lambda_gae = lambda_gae
+        self.cached = [None] * self.capacity
 
         self.batch_size = batch_size
 
@@ -56,16 +57,14 @@ class RolloutBuffer:
 
         self.last_episode_start = self.total
 
-    def add(self, state, actions, reward, done, logprob, state_value, y_t):
+    def add(self, state, actions, reward, done, logprob, state_value):
         if self.ready:
             return
 
-        if self.total >= self.batch_size or done:
+        if self.total >= self.batch_size:
             self.compute_returns_and_advantages(state_value, done)
-
-            if self.total >= self.batch_size:
-                self.ready = True
-                return
+            self.ready = True
+            return
 
         state = torch.tensor(state, dtype=torch.float32).to(self.device)
         reward = torch.tensor(reward, dtype=torch.float32).to(self.device)
@@ -73,7 +72,7 @@ class RolloutBuffer:
 
         self.lock.acquire()
 
-        self.buffer[self.position] = (state, actions, reward, done, logprob, state_value, y_t)
+        self.buffer[self.position] = (state, actions, reward, done, logprob, state_value)
 
         self.position = (self.position + 1) % self.capacity
         self.lock.release()
@@ -89,6 +88,7 @@ class RolloutBuffer:
         self.last_episode_start = 0
         self.total = 0
         self.ready = False
+        self.cached = [None] * self.capacity
         self.lock.release()
 
     def get_batches(self, batch_size):
@@ -104,16 +104,24 @@ class RolloutBuffer:
 
         # List of indices into self.buffer at batch_size intervals
         indices = list(range(0, num_samples, batch_size))
-        random.shuffle(indices)
+        # random.shuffle(indices)
 
         for i in indices:
+            if self.cached[i] is not None:
+                yield self.cached[i]
+                continue
+
             batch = self.buffer[i:i+batch_size]
 
             if len(batch) == batch_size and None not in batch:
-                yield self._process_batch(batch)
+                processed = self._process_batch(batch)
+
+                self.cached[i] = processed
+
+                yield processed
 
     def _process_batch(self, batch):
-        (states, actions, rewards, dones, logprobs, state_values, y_t, advantages, returns) \
+        (states, actions, rewards, dones, logprobs, state_values, advantages, returns) \
             = zip(*batch)
 
         states = torch.stack(states).to(self.device)
@@ -122,8 +130,7 @@ class RolloutBuffer:
         dones = torch.stack(dones).to(self.device)
         logprobs = torch.stack(logprobs).to(self.device)
         state_values = torch.stack(state_values).to(self.device)
-        y_t = torch.stack(y_t).to(self.device)
         advantages = torch.stack(advantages).to(self.device)
         returns = torch.stack(returns).to(self.device)
 
-        return states, actions, rewards, dones, logprobs, state_values, y_t, advantages, returns
+        return states, actions, rewards, dones, logprobs, state_values, advantages, returns

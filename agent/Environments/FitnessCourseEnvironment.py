@@ -86,6 +86,9 @@ class FitnessCourseEnvironment(RatchetEnvironment):
 
     def reset(self):
         # Check that we've landed on the right level yet
+        if self.eval_mode:
+            self.game.set_should_render(True)
+
         while self.game.get_current_level() != 3:
             print("Waiting for Kerwan level change...")
 
@@ -124,7 +127,8 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         spawn_position = Vector3(259, 143, 49.5)
 
         # 70% chance to spawn at random checkpoint, 30% in evaluation mode
-        if np.random.rand() < (0.7 if not self.eval_mode else 0.25):
+        # if np.random.rand() < (0.7 if not self.eval_mode else 0.25):
+        if np.random.rand() < 0.7:
             checkpoint = np.random.randint(0, len(self.checkpoints))
             spawn_position = self.checkpoints_template[checkpoint]
             self.checkpoint = (checkpoint + 1) % len(self.checkpoints)
@@ -138,6 +142,8 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         self.game.joystick_l_y = 0.0
         self.game.joystick_r_x = 0.0
         self.game.joystick_r_y = 0.0
+
+        self.game.set_checkpoint_position(self.checkpoints[self.checkpoint])
 
         # Clear game inputs so we don't keep moving from the last episode
         self.game.set_controller_input(0, 0.0, 0.0, 0.0, 0.0)
@@ -206,7 +212,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
 
         if death_count != self.game.get_death_count():
             terminal = True
-            reward += self.reward("death_penalty", -5.0)
+            reward += self.reward("death_penalty", -1.5)
 
         # Get updated player info
         looking_at_checkpoint = self.game.get_camera_position().is_looking_at(self.game.get_camera_rotation(), checkpoint_position)
@@ -218,8 +224,8 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         distance_delta = position.distance_to_2d(pre_player_position)
 
         # Give reward for looking towards the checkpoint
-        if looking_at_checkpoint:
-            reward += self.reward("looking_at_checkpoint", 0.2)
+        # if looking_at_checkpoint:
+        #     reward += self.reward("looking_at_checkpoint", 0.2)
 
         # Calculate new distances, deltas and differences
         check_delta_x, check_delta_y, check_delta_z = (
@@ -260,7 +266,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         if distance_from_checkpoint < pre_distance_from_checkpoint and distance_from_checkpoint < self.closest_distance_to_checkpoint:
             dist = pre_distance_from_checkpoint - distance_from_checkpoint
             if dist < 10 and dist > 0.01:
-                reward += self.reward("distance_from_checkpoint_reward", (pre_distance_from_checkpoint - distance_from_checkpoint) * 10)
+                reward += self.reward("distance_from_checkpoint_reward", (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.5)
 
                 self.frames_moving_away_from_checkpoint = 0
         # elif distance_from_checkpoint < pre_distance_from_checkpoint:
@@ -283,22 +289,24 @@ class FitnessCourseEnvironment(RatchetEnvironment):
             if self.checkpoint >= len(self.checkpoints):
                 self.checkpoint = 0
 
-            reward += self.reward("reached_checkpoint_reward", 10.0)
+            reward += self.reward("reached_checkpoint_reward", 5.0)
 
             checkpoint_position = self.checkpoints[self.checkpoint]
             distance_from_checkpoint = self.game.get_player_position().distance_to(checkpoint_position)
 
             self.closest_distance_to_checkpoint = distance_from_checkpoint
 
+            self.game.set_checkpoint_position(self.checkpoints[self.checkpoint])
+
         if distance_from_checkpoint > self.closest_distance_to_checkpoint + 10:
-            reward += self.reward("moving_away_from_checkpoint_penalty", -0.5)
+            reward += self.reward("moving_away_from_checkpoint_penalty", -0.05)
 
         # Various speed related rewards and penalties
 
         # Check that the agent hasn't stopped progressing
         if self.time_since_last_checkpoint > 30 * 30:  # 30 in-game seconds
             terminal = True
-            reward += self.reward("timeout_penalty", -2.0)
+            reward += self.reward("timeout_penalty", -1.0)
 
         # Discourage standing still
         # if distance_delta <= 0.01 and self.timer > 30 * 5:
@@ -342,6 +350,8 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         camera_pos = self.game.get_camera_position()
         camera_rot = self.game.get_camera_rotation()
 
+        camera_to_checkpoint_angle = np.arctan2(checkpoint_position.y - camera_pos.y, checkpoint_position.x - camera_pos.x) - camera_rot.z
+
         # Build observation state
         state = [
             # Position
@@ -355,6 +365,8 @@ class FitnessCourseEnvironment(RatchetEnvironment):
             np.interp(camera_pos.z, (-150, 150), (-1, 1)),  # 6
             np.interp(camera_rot.z, (-4, 4), (-1, 1)),  # 7
 
+            np.interp(camera_to_checkpoint_angle, (-4, 4), (-1, 1)),  # 8
+
             # Checkpoints
             np.interp(checkpoint_position.x, (0, 500), (-1, 1)),  # 8
             np.interp(checkpoint_position.y, (0, 500), (-1, 1)),  # 9
@@ -363,23 +375,69 @@ class FitnessCourseEnvironment(RatchetEnvironment):
             check_diff_y,  # 12
             check_diff_z,  # 13
 
-            np.interp(distance_from_checkpoint, (0, 500), (-1, 1)),  # 14
-            np.interp(self.closest_distance_to_checkpoint, (0, 500), (-1, 1)),  # 15
+            np.interp(pre_distance_from_checkpoint, (0, 500), (-1, 1)),  # 14
+            np.interp(distance_from_checkpoint, (0, 500), (-1, 1)),  # 15
+            np.interp(self.closest_distance_to_checkpoint, (0, 500), (-1, 1)),  # 16
 
             # Player data
-            np.interp(distance_from_ground, (-64, 64), (-1, 1)),  # 16
-            np.interp(speed, (0, 2), (-1, 1)),  # 17
-            np.interp(player_state, (0, 255), (-1, 1)),  # 18
+            np.interp(distance_from_ground, (-64, 64), (-1, 1)),  # 17
+            np.interp(speed, (0, 2), (-1, 1)),  # 18
+            np.interp(player_state, (0, 255), (-1, 1)),  # 19
+
+            np.interp(self.timer, (0, 1000 * 1000), (-1, 1)),  # 20
 
             # Joystick
-            self.game.joystick_l_x,  # 19
-            self.game.joystick_l_y,  # 20
-            self.game.joystick_r_x,  # 21
-            self.game.joystick_r_y,  # 22
+            self.game.joystick_l_x,  # 21
+            self.game.joystick_l_y,  # 22
+            self.game.joystick_r_x,  # 23
+            self.game.joystick_r_y,  # 24
 
             # Collision data
             *self.game.get_collisions()  # 64 collisions + 64 classes
         ]
+
+        # state = [
+        #     # Position
+        #     position.x,
+        #     position.y,
+        #     position.z,
+        #     player_rotation.z,
+        #
+        #     camera_pos.x,
+        #     camera_pos.y,
+        #     camera_pos.z,
+        #     camera_rot.z,
+        #
+        #     camera_to_checkpoint_angle,
+        #
+        #     # Checkpoints
+        #     checkpoint_position.x,
+        #     checkpoint_position.y,
+        #     checkpoint_position.z,
+        #     check_diff_x,  # 11
+        #     check_diff_y,  # 12
+        #     check_diff_z,  # 13
+        #
+        #     pre_distance_from_checkpoint,
+        #     distance_from_checkpoint,
+        #     self.closest_distance_to_checkpoint,
+        #
+        #     # Player data
+        #     distance_from_ground,
+        #     speed,
+        #     player_state,
+        #
+        #     self.timer,
+        #
+        #     # Joystick
+        #     self.game.joystick_l_x,  # 21
+        #     self.game.joystick_l_y,  # 22
+        #     self.game.joystick_r_x,  # 23
+        #     self.game.joystick_r_y,  # 24
+        #
+        #     # Collision data
+        #     *self.game.get_collisions()  # 64 collisions + 64 classes
+        # ]
 
         # Does the reward actually need to be normalized?
         if reward > 20 or reward < -20:
@@ -389,10 +447,10 @@ class FitnessCourseEnvironment(RatchetEnvironment):
             reward = max(-20, min(20, reward))
 
         # Iterate through the state to check that none of the values are above 1 or below -1
-        for s, state_value in enumerate(state):
-            if state_value > 1.0 or state_value < -1.0:
-                #print(f"Danger! State out of bounds: {s}. Value: {state_value}")
-                exit(0)
+        # for s, state_value in enumerate(state):
+        #     if state_value > 1.0 or state_value < -1.0:
+        #         print(f"Danger! State out of bounds: {s}. Value: {state_value}")
+        #         exit(0)
 
         return np.array(state, dtype=np.float32), reward, terminal
 

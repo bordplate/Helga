@@ -2,6 +2,7 @@ import time
 
 import torch
 
+from RunningStats import RunningStats
 from Watchdog import Watchdog
 from Environments.FitnessCourseEnvironment import FitnessCourseEnvironment
 
@@ -11,8 +12,8 @@ from PPO.PPOAgent import PPOAgent
 
 from RedisHub import RedisHub
 
-features = 23 + 128
-sequence_length = 8
+features = 26 + 128
+sequence_length = 30
 
 configuration = {
     "model": None,
@@ -40,14 +41,20 @@ def start_worker(args):
     # Connect to Redis
     redis = RedisHub(f"redis://{args.redis_host}:{args.redis_port}", f"{project_key}.rollout_buffer")
 
+    state_running_stats = RunningStats()
+
+    # Agent that we will use only for inference, learning related parameters are not used
+    agent = PPOAgent(features, 7, log_std=-0.5)
+
     if eval_mode:
         # Draws a visualization of the actions and other information
         import Visualizer
         import Plotter
         Plotter.start_plotting()
 
-    # Agent that we will use only for inference, learning related parameters are not used
-    agent = PPOAgent(features, 7, log_std=-0.5)
+        agent.policy.actor.max_log_std = 0.000001
+    else:
+        agent.policy.actor.max_log_std = 0.1
 
     total_steps = 0
     episodes = 0
@@ -58,15 +65,20 @@ def start_worker(args):
         agent.start_new_episode()
         state, _, _ = env.reset()
 
+        state_running_stats.update(state)
+        state = state_running_stats.normalize(state)
+
         state_sequence = np.zeros((sequence_length, features), dtype=np.float32)
         state_sequence[-1] = state
-
+    
         accumulated_reward = 0
         steps = 0
 
         last_done = True
 
         must_check_new_model = False
+
+        agent.action_mask = redis.get_action_mask()
 
         while True:
             while redis.check_buffer_full():
@@ -78,18 +90,28 @@ def start_worker(args):
                 if new_model is not None:
                     agent.load_policy_dict(new_model)
 
-            actions, logprob, state_value, y_t = agent.choose_action(state_sequence)
+                    agent.policy.actor.log_std.weight.data.fill_(0.0001)
+                    agent.policy.actor.log_std.bias.data.fill_(0.0001)
+
+
+            actions, logprob, state_value = agent.choose_action(state_sequence)
             actions = actions.squeeze().cpu()
 
             new_state, reward, done = env.step(actions)
 
+            # state_running_stats.update(new_state)
+            # new_state = state_running_stats.normalize(new_state)
+
             time_left = (30 * 30 - env.time_since_last_checkpoint) / 30
 
-            if not eval_mode:
-                redis.add(state_sequence, actions, reward, last_done, logprob, state_value, y_t)
-            else:
+            # Give some run-in time before we start evaluating the model so state observations are normalized properly
+            if not eval_mode and total_steps > 100:
+                redis.add(state_sequence, actions, reward, last_done, logprob, state_value)
+            elif eval_mode:
                 # Visualize the actions
                 Visualizer.draw_state_value_face(state_value)
+                Visualizer.render_raycast_data(np.float32(env.game.get_collisions(normalized=False)))
+                # Visualizer.render_raycast_data(new_state[features-128:-64].copy())
                 Visualizer.draw_bars(actions, state_value, time_left/30)
 
                 Plotter.add_data(state_value.item(), reward)

@@ -13,6 +13,8 @@
 extern "C" {
 #endif
 
+#define should_render *((int*)0xB00030)
+
 typedef enum GameState {
     PlayerControl = 0,
     Movie = 1,

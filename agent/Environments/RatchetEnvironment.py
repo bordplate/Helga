@@ -5,6 +5,8 @@ class RatchetEnvironment:
     def __init__(self):
         self.reward_counters = {}
 
+        self.stats = {}
+
     def start(self):
         process_opened = self.game.open_process()
         while not process_opened:
@@ -23,5 +25,16 @@ class RatchetEnvironment:
             return value
 
         self.reward_counters[key] += value
+
+        return value
+
+    def stat(self, name: str, value: {}) -> {}:
+        key = f"stats/{name}"
+
+        if key not in self.stats:
+            self.stats[key] = value
+            return value
+
+        self.stats[key] = value
 
         return value

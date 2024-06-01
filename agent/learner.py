@@ -13,25 +13,27 @@ from util import update_graph_html
 
 
 class Config:
-    learning_rate_actor     = 5e-6
-    learning_rate_critic    = 1e-5
-    features                = 23 + 128
+    learning_rate_critic    = 1e-4
+    learning_rate_actor     = 1e-4
+    features                = 26 + 128
     actions                 = 7
     batch_size              = 1024 * 8
     mini_batch_size         = 1024 * 2
-    sequence_length         = 8
+    sequence_length         = 30
 
-    gamma                   = 0.99
-    K_epochs                = 5
+    gamma                   = 0.995
+    K_epochs                = 10
     eps_clip                = 0.2
     log_std                 = -1.0
-    ent_coef                = 0.01
-    lambda_gae              = 0.95
-    critic_loss_coeff       = 1
+    ent_coef                = 0.0001
+    lambda_gae              = 0.9
+    critic_loss_coeff       = 0.5
+    # kl_threshold            = 0.025
+    kl_threshold            = 1.0
 
     @staticmethod
     def serialize():
-        return {key: Config.__dict__[key] for key in Config.__dict__ if not key.startswith("__")}
+        return {key: Config.__dict__[key] for key in Config.__dict__ if not key.startswith("__") and not callable(Config.__dict__[key])}
 
 
 def start(args):
@@ -42,20 +44,23 @@ def start(args):
 
     # Create an agent
     agent = PPOAgent(
-        Config.features,
-        Config.actions,
-        Config.learning_rate_actor,
-        Config.learning_rate_critic,
-        Config.batch_size,
-        Config.mini_batch_size,
-        Config.gamma,
-        Config.K_epochs,
-        Config.eps_clip,
-        Config.log_std,
-        Config.ent_coef,
+        state_dim=Config.features,
+        action_dim=Config.actions,
+        lr_actor=Config.learning_rate_actor,
+        lr_critic=Config.learning_rate_critic,
+        batch_size=Config.batch_size,
+        mini_batch_size=Config.mini_batch_size,
+        gamma=Config.gamma,
+        K_epochs=Config.K_epochs,
+        eps_clip=Config.eps_clip,
+        log_std=Config.log_std,
+        ent_coef=Config.ent_coef,
         cl_coeff=Config.critic_loss_coeff,
         lambda_gae=Config.lambda_gae,
+        kl_threshold=Config.kl_threshold
     )
+
+    agent.action_mask = redis.get_action_mask()
 
     # Load existing model if load_model is set
     if args.model:
@@ -95,10 +100,13 @@ def start(args):
     policy_losses = []
     value_losses = []
     entropy_losses = []
+    kl_divs = []
 
     steps = 0
 
     print("Starting training loop...")
+
+    last_kl_div = 0
 
     while True:
         processed = False
@@ -111,7 +119,7 @@ def start(args):
             print(f"[{i}:{replay_buffer.total}]", end="")
 
         if all_buffers_ready and len(agent.replay_buffers) > 0:
-            loss, policy_loss, value_loss, entropy_loss = agent.learn()
+            loss, policy_loss, value_loss, entropy_loss, last_kl_div = agent.learn()
 
             losses.append(loss)
             policy_losses.append(policy_loss)
@@ -151,7 +159,8 @@ def start(args):
                       'avg_score: %.2f' % np.mean(scores),
                       'policy_loss: %.2f' % np.mean(policy_losses[-100:]),
                       'value_loss: %.2f' % np.mean(value_losses[-100:]),
-                      'entropy_loss: %.2f' % np.mean(entropy_losses[-100:])
+                      'entropy_loss: %.2f' % np.mean(entropy_losses[-100:]),
+                      'kl_div: %.2f' % last_kl_div,
                 )
 
                 # log_std_params = [ "%.5f" % x for x in agent.policy.actor.log_std.squeeze().tolist() ]
@@ -165,12 +174,15 @@ def start(args):
             if args.wandb:
                 wandb.log({
                     "avg_score": np.mean(scores),
-                    "loss": np.mean(losses[-100:]),
+                    "loss": losses[-1] if len(losses) > 0 else 0,
                     "avg_checkpoints": np.mean(checkpoints),
-                    "policy_loss": np.mean(policy_losses[-100:]),
-                    "value_loss": np.mean(value_losses[-100:]),
-                    "entropy_loss": np.mean(entropy_losses[-100:]),
+                    "policy_loss": policy_losses[-1] if len(policy_losses) > 0 else 0,
+                    "value_loss": value_losses[-1] if len(value_losses) > 0 else 0,
+                    "entropy_loss": entropy_losses[-1] if len(entropy_losses) > 0 else 0,
+                    "kl_div": last_kl_div,
                 })
+
+            agent.action_mask = redis.get_action_mask()
 
 
 if __name__ == "__main__":

@@ -7,8 +7,6 @@ from matplotlib.animation import FuncAnimation
 
 
 # Pygame setup
-screen_width, screen_height = 1000, 220
-
 bar_width = 80
 spacing = 20
 
@@ -26,12 +24,17 @@ bar_height = 220
 face_y = bar_height
 face_height = 300
 
-screen_width, screen_height = 1000, bar_height + face_height
+raycast_y = bar_height + face_height
+raycast_height = 400
+
+screen_width, screen_height = 1000, bar_height + face_height + raycast_height
 
 screen = pygame.display.set_mode((screen_width, screen_height))
 pygame.display.set_caption("Action Visualization")
 
 font = pygame.font.Font(None, 24)
+
+state_values = deque(maxlen=400)
 
 
 def draw_state_value_face(state_value):
@@ -41,6 +44,13 @@ def draw_state_value_face(state_value):
 
     Picks an image from ./imgs/face_{state_value}.png
     """
+    state_value = state_value.to('cpu').detach()
+    state_values.append(state_value)
+
+    max_value = max(abs(max(state_values)), abs(min(state_values)))
+
+    state_value = (state_value / max_value) * 2
+
     screen.fill((0, 0, 255))
 
     if abs(state_value) > 5:
@@ -65,6 +75,74 @@ def draw_state_value_face(state_value):
     screen.blit(face_img, (0, bar_height))
 
     # pygame.display.flip()
+
+
+def render_raycast_data(raycast_data):
+    """
+    The first 64 values in raycast data is a flattened 2D 8x8 grid of floats between 0.0f and 64.0f.
+    The last 64 values are data about which entity it has collided with. Values below 0 should be white. 0 and up should be colored.
+    This function renders a heatmap, where collision (moby data below 0) is white and other entities are colored. The distance decides the opacity of each pixel.
+    """
+    mobys = raycast_data[-64:].copy()
+    raycast_data = raycast_data[:-64].copy()
+
+    mobys = mobys.reshape(8, 8)
+    raycast_data = raycast_data.reshape(8, 8)
+
+    # mobys = np.repeat(mobys, 4, axis=1)
+    # raycast_data = np.repeat(raycast_data, 4, axis=1)
+
+    mobys[mobys < 0] = 4096  # Mark non-colliding areas as maximum value
+    raycast_data[raycast_data < 0] = 64  # Mark values below 0
+
+    raycast_data = raycast_data / 64
+    raycast_data = np.clip(raycast_data, 0, 1)
+
+    # Invert the grayscale mapping: 0 -> 255 (white), 1 -> 0 (black)
+    grayscale_data = 1 - raycast_data
+
+    # Create a color scale for mobys data
+    colors = np.zeros((8, 8, 3), dtype=np.uint8)
+    norm_mobys = mobys / 4096  # Normalize mobys data to range 0-1
+
+    # Full color spectrum interpolation from red to white
+    for i in range(8):
+        for j in range(8):
+            if norm_mobys[i, j] < 1:
+                value = norm_mobys[i, j]
+                if value < 1/6:
+                    r, g, b = 255, int(255 * 6 * value), 0
+                elif value < 2/6:
+                    r, g, b = int(255 * (2 - 6 * value)), 255, 0
+                elif value < 3/6:
+                    r, g, b = 0, 255, int(255 * (6 * value - 2))
+                elif value < 4/6:
+                    r, g, b = 0, int(255 * (4 - 6 * value)), 255
+                elif value < 5/6:
+                    r, g, b = int(255 * (6 * value - 4)), 0, 255
+                else:
+                    r, g, b = 255, 0, int(255 * (6 - 6 * value))
+                colors[i, j] = [r, g, b]
+            else:
+                colors[i, j] = [255, 255, 0]
+
+    # Apply grayscale where mobys are below 0 (now set to 4096)
+    mask = mobys >= 4096
+    grayscale_rgb = np.stack([grayscale_data] * 3, axis=-1) * 255
+    colors[mask] = grayscale_rgb[mask]
+
+    # Flip and rotate as needed
+    colors = np.rot90(colors)
+
+    # Scale up for better visibility
+    colors = np.repeat(colors, 50, axis=0)
+    colors = np.repeat(colors, 50, axis=1)
+
+    # Create a Pygame surface
+    raycast_surface = pygame.Surface(colors.shape[:2])
+    pygame.surfarray.blit_array(raycast_surface, colors)
+
+    screen.blit(raycast_surface, (0, bar_height + face_height))
 
 
 def draw_bars(actions, state_value, progress):
@@ -99,21 +177,6 @@ def draw_bars(actions, state_value, progress):
     bar_x = 7 * (bar_width + spacing) + 50
     bar_y = bar_height - 40 - height
 
-    if state_value < 0:
-        bar_y += height
-
-        # Gradient red to white
-        col = (int(255 * _state_value), int(255 * (1 - _state_value)), int(255 * (1 - _state_value)))
-    else:
-        # Gradient green to white
-        col = (int(255 * (1 - _state_value)), int(255 * _state_value), int(255 * (1 - _state_value)))
-
-    pygame.draw.rect(screen, col, pygame.Rect(bar_x, bar_y - 90, bar_width, height))
-
-    label = font.render("State Value", True, (255, 255, 255))
-    label_pos_x = bar_x + (bar_width - label.get_width()) // 2
-    screen.blit(label, (label_pos_x, bar_height - 40))
-
     # Draw a progress bar at the bottom of the screen
     progress_bar_width = int(progress * screen_width)
     pygame.draw.rect(screen, (255, 0, 0xdb), pygame.Rect(0, bar_height - 10, progress_bar_width, 10))
@@ -122,6 +185,4 @@ def draw_bars(actions, state_value, progress):
 
     # Pygame event handling
     for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            pygame.quit()
-            return
+        pass

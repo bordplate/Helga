@@ -3,28 +3,33 @@ import torch
 
 
 class RunningStats:
-    def __init__(self):
-        self.n = 0
-        self.mean = None
-        self.run_var = None
+    def __init__(self, epsilon=1e-4, shape=()):
+        self.mean = np.zeros(shape, 'float32')
+        self.var = np.ones(shape, 'float32')
+        self.count = epsilon
 
     def update(self, x):
-        x = np.array(x)  # Ensure x is an array
-        if self.mean is None:
-            self.mean = np.zeros_like(x)
-            self.run_var = np.zeros_like(x)
+        batch_mean = np.mean(x, axis=0)
+        batch_var = np.var(x, axis=0)
+        batch_count = x.shape[0]
+        self.update_from_moments(batch_mean, batch_var, batch_count)
 
-        self.n += 1
-        old_mean = np.copy(self.mean)
-        self.mean += (x - self.mean) / self.n
-        self.run_var += (x - old_mean) * (x - self.mean)
+    def update_from_moments(self, batch_mean, batch_var, batch_count):
+        delta = batch_mean - self.mean
+        total_count = self.count + batch_count
 
-    def variance(self):
-        return self.run_var / self.n if self.n > 1 else np.zeros_like(self.run_var)
+        new_mean = self.mean + delta * batch_count / total_count
+        m_a = self.var * self.count
+        m_b = batch_var * batch_count
+        M2 = m_a + m_b + np.square(delta) * self.count * batch_count / total_count
+        new_var = M2 / total_count
 
-    def standard_deviation(self):
-        return np.sqrt(self.variance()) + 1e-7
+        self.mean = new_mean
+        self.var = new_var
+        self.count = total_count
 
+    def normalize(self, x):
+        return (x - self.mean) / np.sqrt(self.var + 1e-8)
 
 class TorchRunningMeanStd:
     def __init__(self, epsilon=1e-4, shape=(), device=None):
