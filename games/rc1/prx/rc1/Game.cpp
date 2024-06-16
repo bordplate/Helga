@@ -89,6 +89,10 @@ LogLevel Logger::log_level_ = Debug;
 
 #define checkpoint_position ((Vec4*)0xB00400)
 
+#define collisions_normals_x ((float*)0xB00600)
+#define collisions_normals_y ((float*)0xB00700)
+#define collisions_normals_z ((float*)0xB00A00)
+
 
 #define CHECKPOINT_ROTATION_SPEED 0.001*3.14159
 #define CHECKPOINT_AMPLITUDE 0.01
@@ -180,7 +184,7 @@ void Game::on_tick() {
     if (!current_view) {
         RemoteView* view = new RemoteView();
         this->transition_to(view);
-    } else if (current_planet != 0 && frame_count > 60) {
+    } else if (current_planet != 0 && frame_count > 2) {
         RemoteView* view = (RemoteView*)current_view;
 
         // If we're running with renderer, we should render checkpoints
@@ -332,6 +336,9 @@ void Game::on_tick() {
                 if (coll) {
                     collisions_distance[i * cols + j] = distance(camera_pos, coll_output.ip);
                     collisions_class[i * cols + j] = -1;
+                    collisions_normals_x[i * cols + j] = coll_output.normal.x;
+                    collisions_normals_y[i * cols + j] = coll_output.normal.y;
+                    collisions_normals_z[i * cols + j] = coll_output.normal.z;
 
                     if (coll_output.pMoby) {
                         collisions_class[i * cols + j] = coll_output.pMoby->oClass;
@@ -527,9 +534,9 @@ void Game::on_tick() {
 //        view->coll_right = collision_right;
     }
 
-    custom_frame_count += 1;
 
-    while (progress_frame_count != custom_frame_count && current_planet != 0) {}
+    while (progress_frame_count < custom_frame_count && current_planet != 0) {}
+    custom_frame_count += 1;
 
     return;
 }

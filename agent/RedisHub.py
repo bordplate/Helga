@@ -21,9 +21,10 @@ TransitionMessage = namedtuple('TransitionMessage', ('transition', 'worker_name'
 
 
 class RedisHub:
-    def __init__(self, redis_url, identifier):
+    def __init__(self, redis_url, identifier, device='cpu'):
         self.redis = redis_from_url(redis_url)
         self.key = identifier
+        self.device = device
 
         self.latest_model = 0
         self.model = None
@@ -144,7 +145,7 @@ class RedisHub:
     def get_action_mask(self):
         mask = self.redis.get("rac1.fitness-course.action_mask")
         if mask is not None:
-            return torch.tensor(pickle.loads(mask), dtype=torch.float32).to('cuda')
+            return torch.tensor(pickle.loads(mask), dtype=torch.float32, device=self.device)
 
         return None
 
@@ -195,7 +196,7 @@ class RedisHub:
                             replay_buffer = buffers[data.worker_name]
                         else:
                             buffers[data.worker_name] = RolloutBuffer(data.worker_name, 1000000, agent.batch_size, agent.gamma,
-                                                                      agent.lambda_gae)
+                                                                      agent.lambda_gae, device=agent.device)
                             agent.replay_buffers.append(buffers[data.worker_name])
                             replay_buffer = buffers[data.worker_name]
 

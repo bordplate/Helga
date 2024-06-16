@@ -1,7 +1,14 @@
 import threading
 import time
+import os
+import ctypes
+import subprocess
 
 from Game.RC1Game import RC1Game
+
+# Define the prctl function from the C library
+libc = ctypes.CDLL('libc.so.6')
+PR_SET_NAME = 15
 
 
 class Watchdog:
@@ -10,47 +17,53 @@ class Watchdog:
         RPCS3.
     """
     def __init__(self,
-                 env: RC1Game,
-                 process_name: str="rpcs3.exe",
-                 rpcs3_path: str = "C:\\Users\\Vetle Hjelle\\Applications\\rpcs3-v0.0.15-12160-86a8e071_win64\\",
-                 game_path: str = r"..\games\rc1\build\PS3_GAME",
+                 game_path: str = r"../games/rc1/build/PS3_GAME",
                  render: bool = True
                  ):
-        self.env = env
-        self.process_name = process_name
-        self.rpcs3_path = rpcs3_path
         self.game_path = game_path
         self.render = render
-
-        self.env.process.process_name = process_name
 
         self.last_frame_count = 0
         self.last_frame_count_time = 0
 
-    def start(self):
+    def start(self, force=False):
         # If we're running in PyCharm debug mode, don't start the watchdog, unless --force-watchdog is passed
         import sys
         if "pydevd" in sys.modules and "--force-watchdog" not in sys.argv:
             print("Watchdog: Not starting watchdog because we're running in PyCharm debug mode.")
             return
 
-        # Check if the process is running, if not, we run it
-        import psutil
-        if not any(process.name() == self.process_name for process in psutil.process_iter()):
-            print("Watchdog: RPCS3 is not running, starting it...")
-            import subprocess
-            subprocess.Popen([
-                rf"{self.rpcs3_path}\{self.process_name}",
-                self.game_path,
-                "--no-gui",
-                "--headless" if not self.render else ""]
-            )
+        print("Starting RPCS3...")
+        import subprocess
 
-            time.sleep(10)
+        config_file = "../rpcs3-config.yml" if not self.render else "../eval-config.yml"
 
-        thread = threading.Thread(target=self.run, args=())
-        thread.daemon = True
-        thread.start()
+        # Generate a unique process name for the RPCS3 process
+        process_name = f"rpcs3-{time.time()}"
+
+        if self.render:
+            process_name = f"{process_name}-eval"
+
+        process = subprocess.Popen([
+                rf"/bin/bash", "-c",
+                f"exec -a {process_name} /usr/bin/rpcs3 --no-gui --config {config_file} {self.game_path}",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        # Get the PID of the process
+        self.pid = process.pid
+
+        # Change the name of the running process so we can distinguish it from
+
+        time.sleep(10)
+
+        # thread = threading.Thread(target=self.run, args=())
+        # thread.daemon = True
+        # thread.start()
+
+        return True
 
     def run(self):
         if self.env is None:

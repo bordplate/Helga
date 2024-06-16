@@ -9,20 +9,16 @@ from .PositionalEncoding import PositionalEncoding
 
 import numpy as np
 
-device = torch.device('cpu')
-if torch.cuda.is_available():
-    device = torch.device('cuda:0')
-    torch.cuda.empty_cache()
-
 
 class ActorCritic(nn.Module):
-    def __init__(self, state_dim, action_dim, log_std):
+    def __init__(self, state_dim, action_dim, log_std, device='cpu'):
         super(ActorCritic, self).__init__()
+        self.device = device
 
         self.action_dim = action_dim
 
-        self.actor = Actor(state_dim, action_dim, log_std)
-        self.critic = Critic(state_dim, 1)
+        self.actor = Actor(state_dim, action_dim, log_std, device=device)
+        self.critic = Critic(state_dim, 1, device=device)
 
     def forward(self):
         raise NotImplementedError
@@ -50,8 +46,10 @@ class ActorCritic(nn.Module):
 
 
 class Actor(nn.Module):
-    def __init__(self, feature_count, action_dim, log_std=-3, max_log_std=0.45):
+    def __init__(self, feature_count, action_dim, log_std=-3, max_log_std=0.45, device='cpu'):
         super(Actor, self).__init__()
+
+        self.device = device
 
         self.action_dim = action_dim
         self.max_log_std = max_log_std
@@ -127,7 +125,7 @@ class Actor(nn.Module):
     def get_action(self, state, action=None, mask=None):
         # If mask is not tensor, spit warning once and convert it to tensor
         if mask is not None and not torch.is_tensor(mask):
-            mask = torch.tensor(mask, dtype=torch.float32).to(device)
+            mask = torch.tensor(mask, dtype=torch.float32, device=self.device)
 
             if self._warned_mask_is_not_tensor is None:
                 self._warned_mask_is_not_tensor = True
@@ -145,8 +143,9 @@ class Actor(nn.Module):
 
 
 class Critic(nn.Module):
-    def __init__(self, feature_count, action_dim):
+    def __init__(self, feature_count, action_dim, device='cpu'):
         super(Critic, self).__init__()
+        self.device = device
 
         self.action_dim = action_dim
         self.feature_count = feature_count

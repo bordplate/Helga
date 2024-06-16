@@ -1,5 +1,6 @@
 import time
 import numpy as np
+import torch
 
 from Game.Game import Game, Vector3
 from Game.RC1Game import RC1Game
@@ -7,10 +8,10 @@ from .RatchetEnvironment import RatchetEnvironment
 
 
 class FitnessCourseEnvironment(RatchetEnvironment):
-    def __init__(self, process_name="rpcs3.exe", eval_mode=False):
-        super().__init__()
+    def __init__(self, pid, eval_mode=False, device="cpu"):
+        super().__init__(device=device)
 
-        self.game = RC1Game(process_name=process_name)
+        self.game = RC1Game(pid=pid)
 
         self.checkpoints_template = [
             Vector3(226, 143, 49.5),
@@ -205,7 +206,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         pre_angle = np.arctan2(checkpoint_position.y - pre_player_position.y, checkpoint_position.x - pre_player_position.x) - pre_player_rotation.z
 
         # Frame advance the game
-        if not self.game.frame_advance() or not self.game.frame_advance():
+        if not self.game.frame_advance(frameskip=2):
             # If we can't frame advance, the game has probably crashed
             terminal = True
             reward += self.reward("crash_penalty", -1.0)
@@ -392,8 +393,11 @@ class FitnessCourseEnvironment(RatchetEnvironment):
             self.game.joystick_r_x,  # 23
             self.game.joystick_r_y,  # 24
 
+            # Face buttons
+            np.interp(action, (0, 0xFFFFFFFF), (-1, 1)),  # 25
+
             # Collision data
-            *self.game.get_collisions()  # 64 collisions + 64 classes
+            *self.game.get_collisions()  # 64 collisions + 64 classes + 64*3 normals
         ]
 
         # state = [
@@ -452,13 +456,13 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         #         print(f"Danger! State out of bounds: {s}. Value: {state_value}")
         #         exit(0)
 
-        return np.array(state, dtype=np.float32), reward, terminal
+        return torch.tensor(state, dtype=torch.float32, device=self.device), reward, terminal
 
 
 # Just used for various tests of the environment
 if __name__ == '__main__':
     try:
-        env = RatchetEnvironment()
+        env = FitnessCourseEnvironment(process_name="rpcs3.exe", eval_mode=False, device="cpu")
         env.start()
 
         while True:
@@ -472,22 +476,23 @@ if __name__ == '__main__':
             total_reward = 0
 
             while True:
-                current_time = time.time()
+                # current_time = time.time()
 
-                _, reward, terminal = env.step(0)
+                _, reward, terminal = env.step([0, 0, 0, 0, 0, 0, 0])
+                # env.game.frame_advance()
 
-                total_reward += reward
+                # total_reward += reward
 
                 # if terminal:
                 #     print(f"\nTotal reward: {total_reward}")
                 #     break
 
-                current_position = env.game.get_player_position()
-                print(f"\r[{current_position.x}, {current_position.y}, {current_position.z}, {env.game.get_player_rotation().z}],", end="")
-
-                # Schedule next frame
-                next_frame_time += 1 / 60  # Schedule for the next 1/60th second
-                time.sleep(0.016)
+                # current_position = env.game.get_player_position()
+                # print(f"\r[{current_position.x}, {current_position.y}, {current_position.z}, {env.game.get_player_rotation().z}],", end="")
+                #
+                # # Schedule next frame
+                # next_frame_time += 1 / 60  # Schedule for the next 1/60th second
+                # time.sleep(0.016)
 
                 steps += 1
     except KeyboardInterrupt:

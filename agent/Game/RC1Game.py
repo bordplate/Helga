@@ -27,6 +27,9 @@ class RC1Game(Game):
 
     collisions_address = 0xB00100
     collisions_class_address = 0xB00200
+    collisions_normals_x = 0xB00600
+    collisions_normals_y = 0xB00700
+    collisions_normals_z = 0xB00A00
 
     oscillation_offset_x_address = 0xB00060
     oscillation_offset_y_address = 0xB00064
@@ -48,6 +51,10 @@ class RC1Game(Game):
     camera_position_address = 0x951500
     camera_rotation_address = 0x951510
 
+    camera_forward_address = 0x9513c0
+    camera_right_address = 0x9513d0
+    camera_up_address = 0x9513e0
+
     checkpoint_position_address = 0xb00400
 
     death_count_address = 0xB00500
@@ -57,8 +64,8 @@ class RC1Game(Game):
     joystick_r_x = 0.0
     joystick_r_y = 0.0
 
-    def __init__(self, process_name="rpcs3.exe"):
-        super().__init__(process_name)
+    def __init__(self, pid):
+        super().__init__(pid)
 
         self.game_key = "rc1"
 
@@ -242,6 +249,40 @@ class RC1Game(Game):
 
         return camera_rotation
 
+    def get_camera_vectors(self):
+        """
+        Gets and returns the forward, right, and up vectors of the camera.
+        """
+        camera_forward_buffer = self.process.read_memory(self.camera_forward_address, 12)
+        camera_right_buffer = self.process.read_memory(self.camera_right_address, 12)
+        camera_up_buffer = self.process.read_memory(self.camera_up_address, 12)
+
+        if camera_forward_buffer is None or camera_right_buffer is None or camera_up_buffer is None:
+            return Vector3(), Vector3(), Vector3()
+
+        # Flip each 4 bytes to convert from big endian to little endian
+        camera_forward_buffer = (camera_forward_buffer[3::-1] +
+                                 camera_forward_buffer[7:3:-1] +
+                                 camera_forward_buffer[11:7:-1])
+
+        camera_right_buffer = (camera_right_buffer[3::-1] +
+                               camera_right_buffer[7:3:-1] +
+                               camera_right_buffer[11:7:-1])
+
+        camera_up_buffer = (camera_up_buffer[3::-1] +
+                            camera_up_buffer[7:3:-1] +
+                            camera_up_buffer[11:7:-1])
+
+        camera_forward = Vector3()
+        camera_right = Vector3()
+        camera_up = Vector3()
+
+        ctypes.memmove(ctypes.byref(camera_forward), camera_forward_buffer, ctypes.sizeof(camera_forward))
+        ctypes.memmove(ctypes.byref(camera_right), camera_right_buffer, ctypes.sizeof(camera_right))
+        ctypes.memmove(ctypes.byref(camera_up), camera_up_buffer, ctypes.sizeof(camera_up))
+
+        return camera_forward, camera_right, camera_up
+
     def get_collisions(self, normalized=True):
         collisions = []
         classes = []
@@ -296,6 +337,41 @@ class RC1Game(Game):
         # Flatten and return self.collisions_render and self.mobys_render
         return [*self.collisions_render.copy().flatten(), *self.mobys_render.copy().flatten()]
 
+    def get_collisions_with_normals(self):
+        collisions = []
+        normals_x = []
+        normals_y = []
+        normals_z = []
+        classes = []
+
+        # 8 rows, 8 columns
+        for i in range(8):
+            for j in range(8):
+                offset = 4 * (i * 8 + j)
+
+                collision_address = self.collisions_address + offset
+                collision_value = self.process.read_float(collision_address)
+
+                normal_x_address = self.collisions_normals_x + offset
+                normal_x = self.process.read_float(normal_x_address)
+
+                normal_y_address = self.collisions_normals_y + offset
+                normal_y = self.process.read_float(normal_y_address)
+
+                normal_z_address = self.collisions_normals_z + offset
+                normal_z = self.process.read_float(normal_z_address)
+
+                class_address = self.collisions_class_address + offset
+                class_value = self.process.read_int(class_address)
+
+                collisions.append(collision_value)
+                normals_x.append(normal_x)
+                normals_y.append(normal_y)
+                normals_z.append(normal_z)
+                classes.append(class_value)
+
+        return (collisions, classes, normals_x, normals_y, normals_z)
+
     def get_oscillation_offset(self):
         return (int(self.process.read_float(self.oscillation_offset_x_address)),
                 (self.process.read_float(self.oscillation_offset_y_address)))
@@ -340,21 +416,13 @@ class RC1Game(Game):
     def set_should_render(self, should_render):
         self.process.write_int(self.should_render_address, 1 if should_render else 0)
 
-    def frame_advance(self):
+    def frame_advance(self, frameskip=1):
         frame_count = self.get_current_frame_count()
+        target_frame = frame_count + frameskip
 
-        while frame_count == self.last_frame_count:
-            if self.must_restart:
-                self.restart()
+        self.process.write_int(self.frame_progress_address, target_frame)
 
-                return False
-
+        while frame_count < target_frame:
             frame_count = self.get_current_frame_count()
-
-        self.last_frame_count = frame_count
-
-        self.get_collisions_oscillated(normalized=False)
-
-        self.process.write_int(self.frame_progress_address, frame_count)
 
         return True

@@ -7,7 +7,7 @@ from threading import Lock
 
 
 class RolloutBuffer:
-    def __init__(self, owner, capacity, batch_size=512, gamma=0.99, lambda_gae=1):
+    def __init__(self, owner, capacity, batch_size=512, gamma=0.99, lambda_gae=1, device='cpu'):
         self.owner = owner
         self.capacity = capacity
         self.buffer = [None] * capacity
@@ -26,7 +26,7 @@ class RolloutBuffer:
 
         self.discounted_reward = 0
 
-        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        self.device = device
 
     def compute_returns_and_advantages(self, last_value, done):
         last_gae_lam = 0
@@ -67,8 +67,8 @@ class RolloutBuffer:
             return
 
         state = torch.tensor(state, dtype=torch.float32).to(self.device)
-        reward = torch.tensor(reward, dtype=torch.float32).to(self.device)
-        done = torch.tensor(done, dtype=torch.bool).to(self.device)
+        reward = torch.tensor(reward, dtype=torch.float32, device=self.device)
+        done = torch.tensor(done, dtype=torch.bool, device=self.device)
 
         self.lock.acquire()
 
@@ -83,12 +83,14 @@ class RolloutBuffer:
 
     def clear(self):
         self.lock.acquire()
+
         self.buffer = [None] * self.capacity
         self.position = 0
         self.last_episode_start = 0
         self.total = 0
         self.ready = False
         self.cached = [None] * self.capacity
+
         self.lock.release()
 
     def get_batches(self, batch_size):
@@ -121,16 +123,17 @@ class RolloutBuffer:
                 yield processed
 
     def _process_batch(self, batch):
-        (states, actions, rewards, dones, logprobs, state_values, advantages, returns) \
-            = zip(*batch)
+        with torch.no_grad():
+            (states, actions, rewards, dones, logprobs, state_values, advantages, returns) \
+                = zip(*batch)
 
-        states = torch.stack(states).to(self.device)
-        actions = torch.stack(actions).to(self.device)
-        rewards = torch.stack(rewards).to(self.device)
-        dones = torch.stack(dones).to(self.device)
-        logprobs = torch.stack(logprobs).to(self.device)
-        state_values = torch.stack(state_values).to(self.device)
-        advantages = torch.stack(advantages).to(self.device)
-        returns = torch.stack(returns).to(self.device)
+            states = torch.stack(states).to(self.device)
+            actions = torch.stack(actions).to(self.device)
+            rewards = torch.stack(rewards).to(self.device)
+            dones = torch.stack(dones).to(self.device)
+            logprobs = torch.stack(logprobs).to(self.device)
+            state_values = torch.stack(state_values).to(self.device)
+            advantages = torch.stack(advantages).to(self.device)
+            returns = torch.stack(returns).to(self.device)
 
-        return states, actions, rewards, dones, logprobs, state_values, advantages, returns
+            return states, actions, rewards, dones, logprobs, state_values, advantages, returns

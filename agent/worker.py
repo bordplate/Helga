@@ -12,7 +12,7 @@ from PPO.PPOAgent import PPOAgent
 
 from RedisHub import RedisHub
 
-features = 26 + 128
+features = 27 + 128
 sequence_length = 30
 
 configuration = {
@@ -23,38 +23,61 @@ configuration = {
 
 
 def start_worker(args):
+    device = torch.device('cpu')
+    if torch.cuda.is_available():
+        device = torch.device('cuda:0')
+        torch.cuda.empty_cache()
+
     # Get paths from arguments
     rpcs3_path = args.rpcs3_path
     process_name = args.process_name
     render = args.render
     eval_mode = args.eval
     project_key = args.project_key
+    device = "cpu" if args.cpu_only else device
 
-    # Make new environment and watchdog
-    env = FitnessCourseEnvironment(process_name=process_name, eval_mode=eval_mode)
-    watchdog = Watchdog(env.game, rpcs3_path=rpcs3_path, process_name=process_name, render=render)
+    # If we're not being debugged in PyCharm mode, we start a new RPCS3 process using the watchdog, otherwise we connect to an existing one
+    pid = 0
+    import sys
+    if not "pydevd" in sys.modules:
+        # Make new environment and watchdog
+        watchdog = Watchdog(render=eval_mode)
+        if not watchdog.start(force=True):
+            print("Damn, watchdog failed to start the process!")
+            exit(-1)
+        else:
+            pid = watchdog.pid
+    else:
+        # Find the rpcs3 process
+        import psutil
+        for proc in psutil.process_iter():
+            if proc.name() == process_name:
+                pid = proc.pid
+                break
+
+    env = FitnessCourseEnvironment(pid=pid, eval_mode=eval_mode, device=device)
 
     # Watchdog starts RPCS3 and the game for us if it's not already running
-    watchdog.start()
     env.start()
 
     # Connect to Redis
-    redis = RedisHub(f"redis://{args.redis_host}:{args.redis_port}", f"{project_key}.rollout_buffer")
+    redis = RedisHub(f"redis://{args.redis_host}:{args.redis_port}", f"{project_key}.rollout_buffer", device=device)
 
-    state_running_stats = RunningStats()
+    # state_running_stats = RunningStats()
 
     # Agent that we will use only for inference, learning related parameters are not used
-    agent = PPOAgent(features, 7, log_std=-0.5)
+    agent = PPOAgent(features, 7, log_std=-0.5, device=device)
 
     if eval_mode:
+        pass
         # Draws a visualization of the actions and other information
         import Visualizer
-        import Plotter
-        Plotter.start_plotting()
+        # import Plotter
+        # Plotter.start_plotting()
 
         agent.policy.actor.max_log_std = 0.000001
     else:
-        agent.policy.actor.max_log_std = 0.1
+        agent.policy.actor.max_log_std = 0.25
 
     total_steps = 0
     episodes = 0
@@ -62,13 +85,15 @@ def start_worker(args):
 
     # Start stepping through the environment
     while True:
+        torch.cuda.empty_cache()
+
         agent.start_new_episode()
         state, _, _ = env.reset()
 
-        state_running_stats.update(state)
-        state = state_running_stats.normalize(state)
+        # state_running_stats.update(state)
+        # state = state_running_stats.normalize(state)
 
-        state_sequence = np.zeros((sequence_length, features), dtype=np.float32)
+        state_sequence = torch.zeros((sequence_length, features), dtype=torch.float32).to(device)
         state_sequence[-1] = state
     
         accumulated_reward = 0
@@ -90,11 +115,8 @@ def start_worker(args):
                 if new_model is not None:
                     agent.load_policy_dict(new_model)
 
-                    agent.policy.actor.log_std.weight.data.fill_(0.0001)
-                    agent.policy.actor.log_std.bias.data.fill_(0.0001)
-
-
-            actions, logprob, state_value = agent.choose_action(state_sequence)
+            # actions, logprob, state_value = (torch.zeros(7), torch.zeros(1), torch.zeros(1))
+            actions, logprob, state_value = agent.choose_action(state_sequence.unsqueeze(dim=0))
             actions = actions.squeeze().cpu()
 
             new_state, reward, done = env.step(actions)
@@ -105,19 +127,18 @@ def start_worker(args):
             time_left = (30 * 30 - env.time_since_last_checkpoint) / 30
 
             # Give some run-in time before we start evaluating the model so state observations are normalized properly
-            if not eval_mode and total_steps > 100:
+            if not eval_mode:
                 redis.add(state_sequence, actions, reward, last_done, logprob, state_value)
             elif eval_mode:
                 # Visualize the actions
                 Visualizer.draw_state_value_face(state_value)
                 Visualizer.render_raycast_data(np.float32(env.game.get_collisions(normalized=False)))
-                # Visualizer.render_raycast_data(new_state[features-128:-64].copy())
                 Visualizer.draw_bars(actions, state_value, time_left/30)
-
-                Plotter.add_data(state_value.item(), reward)
+            #
+            #     Plotter.add_data(state_value.item(), reward)
 
             # Roll the state sequence and append the new normalized state
-            new_state_sequence = np.roll(state_sequence, -1, axis=0)
+            new_state_sequence = torch.roll(state_sequence, -1, 0)
             new_state_sequence[-1] = new_state
 
             state_sequence = new_state_sequence
@@ -160,14 +181,15 @@ if __name__ == "__main__":
 
         parser = argparse.ArgumentParser()
 
-        parser.add_argument("--rpcs3-path", type=str, required=True)
-        parser.add_argument("--process-name", type=str, required=True)
+        parser.add_argument("--rpcs3-path", type=str, required=False)
+        parser.add_argument("--process-name", type=str, default="rpcs3")
         parser.add_argument("--redis-host", type=str, default="localhost")
         parser.add_argument("--redis-port", type=int, default=6379)
         parser.add_argument("--render", action="store_true", default=True)
         parser.add_argument("--force-watchdog", action="store_false")
         parser.add_argument("--eval", type=bool, action=argparse.BooleanOptionalAction, default=False)
         parser.add_argument("--project-key", type=str, default="rac1.fitness-course")
+        parser.add_argument("--cpu-only", action="store_true", default=False)
 
         args = parser.parse_args()
 

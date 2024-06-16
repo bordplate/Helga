@@ -1,22 +1,15 @@
+import os
 import ctypes
-import ctypes.wintypes as wintypes
 import struct
 
 import psutil
 
-# Windows API functions
-OpenProcess = ctypes.windll.kernel32.OpenProcess
-ReadProcessMemory = ctypes.windll.kernel32.ReadProcessMemory
-WriteProcessMemory = ctypes.windll.kernel32.WriteProcessMemory
-CloseHandle = ctypes.windll.kernel32.CloseHandle
-
 # Constants
-PROCESS_ALL_ACCESS = 0x1F0FFF
-
+PROCESS_ALL_ACCESS = os.O_RDWR | os.O_SYNC
 
 class Process:
-    def __init__(self, process_name, base_offset=0):
-        self.process_name = process_name
+    def __init__(self, pid, base_offset=0):
+        self.pid = pid
         self.process = None
         self.process_handle = None
         self.base_offset = base_offset
@@ -27,41 +20,36 @@ class Process:
         # Find the process in the process list
         while self.process is None:
             for process in psutil.process_iter(['pid', 'name']):
-                if process.info['name'] == self.process_name:
+                if process.info['pid'] == self.pid:
                     self.process = process
                     break
 
             if self.process is None:
-                print("RPCS3 process not found...")
+                print(f"RPCS3 process not found...")
                 return False
             else:
-                self.process_handle = OpenProcess(PROCESS_ALL_ACCESS, False, self.process.info['pid'])
-                print(f"RPCS3 process found. Handle: {self.process_handle}")
+                self.process_handle = os.open(f"/proc/{self.process.info['pid']}/mem", PROCESS_ALL_ACCESS)
+                print(f"{self.process.info['name']} process found. Handle: {self.process_handle}")
 
                 return True
 
     def close_process(self):
-        CloseHandle(self.process_handle)
+        os.close(self.process_handle)
 
     def read_memory(self, address, size):
         buffer = ctypes.create_string_buffer(size)
-        bytes_read = ctypes.c_size_t()
-        address = ctypes.c_void_p(self.base_offset + address)
+        with open(f"/proc/{self.process.info['pid']}/mem", 'rb') as mem_file:
+            mem_file.seek(self.base_offset + address)
+            buffer.raw = mem_file.read(size)
 
-        if ReadProcessMemory(self.process_handle, address, buffer, size, ctypes.byref(bytes_read)):
-            return buffer.raw
-        else:
-            return None
+        return buffer.raw
 
     def write_memory(self, address, data):
-        size = len(data)
-        c_data = ctypes.create_string_buffer(data)
-        bytes_written = ctypes.c_size_t()
-        address = ctypes.c_void_p(self.base_offset + address)
+        with open(f"/proc/{self.process.info['pid']}/mem", 'wb') as mem_file:
+            mem_file.seek(self.base_offset + address)
+            mem_file.write(data)
 
-        result = WriteProcessMemory(self.process_handle, address, c_data, size, ctypes.byref(bytes_written))
-
-        return result
+        return True
 
     def write_int(self, address, value):
         value_bytes = value.to_bytes(4, byteorder='big')

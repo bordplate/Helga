@@ -77,6 +77,8 @@ struct CollOutput {
     Moby* pMoby;
     int poly;
     Vec4 ip;
+
+    int flags;
     Vec4 push;
     Vec4 normal;
     Vec4 v0;

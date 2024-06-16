@@ -6,12 +6,6 @@ from PPO.ActorCritic import ActorCritic
 from RolloutBuffer import RolloutBuffer
 from RE3.RandomEncoder import RandomEncoder
 
-device = torch.device('cpu')
-if torch.cuda.is_available():
-    device = torch.device('cuda:0')
-    torch.cuda.empty_cache()
-
-
 class PPOAgent:
     def __init__(self,
                  state_dim,
@@ -29,7 +23,8 @@ class PPOAgent:
                  max_grad_norm=0.5,
                  beta=0.1,
                  kl_threshold=0.01,
-                 lambda_gae=0.95
+                 lambda_gae=0.95,
+                 device='cpu'
                  ):
         self.gamma = gamma
         self.eps_clip = eps_clip
@@ -66,11 +61,8 @@ class PPOAgent:
     def load_policy_dict(self, policy):
         self.policy.load_state_dict(policy)
 
-    def choose_action(self, state):
+    def choose_action(self, state_sequence: torch.Tensor):
         with torch.no_grad():
-            obs = np.array([state])
-            state_sequence = torch.tensor(obs, dtype=torch.float).to(device)
-
             self.policy.eval()
 
             action, action_logprob, state_value = self.policy.act(state_sequence, self.action_mask)
@@ -82,12 +74,13 @@ class PPOAgent:
         self.policy.actor.train()
         self.policy.critic.train()
 
-        losses = []
-        policy_losses = []
-        value_losses = []
-        entropy_losses = []
+        total_loss = 0
+        total_policy_loss = 0
+        total_value_loss = 0
+        total_entropy_loss = 0
+        total_approx_kl = 0
 
-        approx_kls = []
+        count = 0
 
         # Optimize policy for K epochs
         for epoch in range(self.K_epochs):
@@ -104,12 +97,13 @@ class PPOAgent:
 
                     advantages = advantages.squeeze().detach()
                     returns = returns.squeeze().detach()
+                    old_logprobs = old_logprobs.squeeze(dim=1).detach()
 
                     # advantages = advantages + self.beta * intrinsic_rewards
                     # returns = returns + self.beta * intrinsic_rewards
 
                     # Finding the ratio (pi_theta / pi_theta__old)
-                    ratios = torch.exp(logprobs.sum(dim=1) - old_logprobs.squeeze(dim=1).detach().sum(1))
+                    ratios = torch.exp(logprobs.sum(dim=1) - old_logprobs.sum(dim=1))
                     # ratios = torch.exp(logprobs - old_logprobs.squeeze(dim=1).detach())
 
                     # Normalizing the advantages
@@ -121,46 +115,47 @@ class PPOAgent:
                     actor_loss = -(torch.min(surr1, surr2)).mean()
                     critic_loss = self.mse_loss(state_values.squeeze(), returns.squeeze())
 
-                    policy_losses.append(actor_loss.item())
-                    value_losses.append(critic_loss.item())
+                    total_policy_loss += actor_loss.item()
+                    total_value_loss += critic_loss.item()
 
                     entropy_loss = dist_entropy.sum(dim=1).mean()
-                    entropy_losses.append(entropy_loss.item())
+                    total_entropy_loss += entropy_loss.item()
 
-                    approx_kl = (old_logprobs.squeeze() - logprobs).mean()
-                    approx_kls.append(approx_kl.item())
+                    approx_kl = (old_logprobs - logprobs).mean()
+                    total_approx_kl += approx_kl.item()
+                    count += 1
 
                     loss = actor_loss - self.ent_coef * entropy_loss + self.cl_coeff * critic_loss
 
                     self.optimizer.zero_grad()
                     loss.backward()
-                    losses.append(loss.item())
+                    total_loss += loss.item()
 
                     # Clip the gradients
                     nn.utils.clip_grad_norm_(self.policy.actor.parameters(), self.max_grad_norm)
                     self.optimizer.step()
 
                     # Stop early if kl_divergence is above threshold
-                    if np.mean(approx_kls) > self.kl_threshold:
-                        print(f"Stopping early in {n}:{epoch} due to high KL divergence: {np.mean(approx_kls)}")
+                    if total_approx_kl / count > self.kl_threshold:
+                        print(f"Stopping early in {n}:{epoch}:{count} due to high KL divergence: {total_approx_kl / count }")
                         break
 
-                    del states, actions, _rewards, dones, old_logprobs, old_state_values, advantages, returns
-
                 # Stop early if kl_divergence is above threshold
-                if np.mean(approx_kls) > self.kl_threshold:
+                if total_approx_kl / count > self.kl_threshold:
                     break
 
             # Stop early if kl_divergence is above threshold
-            if np.mean(approx_kls) > self.kl_threshold:
+            if total_approx_kl / count > self.kl_threshold:
                 break
+
+        torch.cuda.empty_cache()
 
         # Clear the buffers
         for buffer in self.replay_buffers:
             buffer.clear()
 
-        return (np.mean(losses) if len(losses) > 0 else 0,
-                np.mean(policy_losses) if len(policy_losses) > 0 else 0,
-                np.mean(value_losses) if len(value_losses) > 0 else 0,
-                np.mean(entropy_losses) if len(entropy_losses) > 0 else 0,
-                np.mean(approx_kls) if len(approx_kls) > 0 else 0)
+        return (total_loss / count if count > 0 else 0,
+                total_policy_loss / count if count > 0 else 0,
+                total_value_loss / count if count > 0 else 0,
+                total_entropy_loss / count if count > 0 else 0,
+                total_approx_kl / count if count > 0 else 0)

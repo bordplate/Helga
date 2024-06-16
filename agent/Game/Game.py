@@ -1,7 +1,12 @@
+import os
 import ctypes
 import math
+import numpy as np
 
-from Game.Process import Process
+if os.name == 'nt':
+    from Game.WindowsProcess import Process
+elif os.name == 'posix':
+    from Game.LinuxProcess import Process
 
 
 # Vector3
@@ -27,20 +32,23 @@ class Vector3(ctypes.Structure):
         angle = self.angle_to(other)
         return abs(angle - rotation.z) < angle_threshold
 
+    def numpy(self):
+        return np.array([self.x, self.y, self.z])
+
     def __sub__(self, other):
         return Vector3(self.x - other.x, self.y - other.y, self.z - other.z)
 
 
 class Game:
-    def __init__(self, process_name="rpcs3.exe"):
-        self.process_name = process_name
+    def __init__(self, pid):
+        self.pid = pid
 
-        self.process = Process(self.process_name, base_offset=self.offset)
+        self.process = Process(pid, base_offset=self.offset)
         self.last_frame_count = 0
         self.must_restart = False
 
     def open_process(self):
-        self.process = Process(self.process_name, base_offset=self.offset)
+        self.process = Process(self.pid, base_offset=self.offset)
         return self.process.open_process()
 
     def close_process(self):

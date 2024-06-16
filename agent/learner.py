@@ -15,7 +15,7 @@ from util import update_graph_html
 class Config:
     learning_rate_critic    = 1e-4
     learning_rate_actor     = 1e-4
-    features                = 26 + 128
+    features                = 27 + 128
     actions                 = 7
     batch_size              = 1024 * 8
     mini_batch_size         = 1024 * 2
@@ -29,7 +29,7 @@ class Config:
     lambda_gae              = 0.9
     critic_loss_coeff       = 0.5
     # kl_threshold            = 0.025
-    kl_threshold            = 1.0
+    kl_threshold            = 0.1
 
     @staticmethod
     def serialize():
@@ -37,10 +37,17 @@ class Config:
 
 
 def start(args):
+    if not torch.cuda.is_available():
+        print("CUDA not available, exiting...")
+        exit(0)
+
+    device = torch.device('cuda:0')
+    torch.cuda.empty_cache()
+
     commit = args.commit
 
     # redis = redis_from_url(f"redis://{args.redis_host}:{args.redis_port}")
-    redis = RedisHub(f"redis://{args.redis_host}:{args.redis_port}", "rac1.fitness-course.rollout_buffer")
+    redis = RedisHub(f"redis://{args.redis_host}:{args.redis_port}", "rac1.fitness-course.rollout_buffer", device=device)
 
     # Create an agent
     agent = PPOAgent(
@@ -57,10 +64,11 @@ def start(args):
         ent_coef=Config.ent_coef,
         cl_coeff=Config.critic_loss_coeff,
         lambda_gae=Config.lambda_gae,
-        kl_threshold=Config.kl_threshold
+        kl_threshold=Config.kl_threshold,
+        device=device
     )
 
-    agent.action_mask = redis.get_action_mask()
+    # agent.action_mask = redis.get_action_mask()
 
     # Load existing model if load_model is set
     if args.model:
@@ -182,7 +190,7 @@ def start(args):
                     "kl_div": last_kl_div,
                 })
 
-            agent.action_mask = redis.get_action_mask()
+            # agent.action_mask = redis.get_action_mask()
 
 
 if __name__ == "__main__":

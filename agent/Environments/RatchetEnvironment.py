@@ -2,10 +2,12 @@ import time
 
 
 class RatchetEnvironment:
-    def __init__(self):
+    def __init__(self, device="cpu"):
         self.reward_counters = {}
 
         self.stats = {}
+
+        self.device = device
 
     def start(self):
         process_opened = self.game.open_process()

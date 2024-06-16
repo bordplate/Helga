@@ -132,6 +132,7 @@ def render_raycast_data(raycast_data):
     colors[mask] = grayscale_rgb[mask]
 
     # Flip and rotate as needed
+    colors = np.flip(colors, axis=1)
     colors = np.rot90(colors)
 
     # Scale up for better visibility

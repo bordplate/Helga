@@ -2,7 +2,7 @@ import ctypes
 
 import numpy as np
 
-from .Process import Process
+from .WindowsProcess import Process
 from .Game import Game, Vector3
 
 
