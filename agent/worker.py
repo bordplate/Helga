@@ -75,7 +75,7 @@ def start_worker(args):
         # import Plotter
         # Plotter.start_plotting()
 
-        agent.policy.actor.max_log_std = 0.000001
+        agent.policy.actor.max_log_std = 0.25
     else:
         agent.policy.actor.max_log_std = 0.25
 
@@ -93,7 +93,7 @@ def start_worker(args):
         # state_running_stats.update(state)
         # state = state_running_stats.normalize(state)
 
-        state_sequence = torch.zeros((sequence_length, features), dtype=torch.float32).to(device)
+        state_sequence = torch.zeros((sequence_length, features), dtype=torch.bfloat16).to(device)
         state_sequence[-1] = state
     
         accumulated_reward = 0
@@ -117,7 +117,7 @@ def start_worker(args):
 
             # actions, logprob, state_value = (torch.zeros(7), torch.zeros(1), torch.zeros(1))
             actions, logprob, state_value = agent.choose_action(state_sequence.unsqueeze(dim=0))
-            actions = actions.squeeze().cpu()
+            actions = actions.to(dtype=torch.float32).squeeze().cpu()
 
             new_state, reward, done = env.step(actions)
 
@@ -132,7 +132,8 @@ def start_worker(args):
             elif eval_mode:
                 # Visualize the actions
                 Visualizer.draw_state_value_face(state_value)
-                Visualizer.render_raycast_data(np.float32(env.game.get_collisions(normalized=False)))
+                Visualizer.draw_score_and_checkpoint(accumulated_reward, env.n_checkpoints)
+                Visualizer.render_raycast_data(np.float16(env.game.get_collisions(normalized=False)))
                 Visualizer.draw_bars(actions, state_value, time_left/30)
             #
             #     Plotter.add_data(state_value.item(), reward)

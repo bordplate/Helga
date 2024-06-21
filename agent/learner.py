@@ -13,12 +13,12 @@ from util import update_graph_html
 
 
 class Config:
-    learning_rate_critic    = 1e-4
-    learning_rate_actor     = 1e-4
+    learning_rate_critic    = 1e-6
+    learning_rate_actor     = 1e-6
     features                = 27 + 128
     actions                 = 7
-    batch_size              = 1024 * 8
-    mini_batch_size         = 1024 * 2
+    batch_size              = 768 * 10
+    mini_batch_size         = 768
     sequence_length         = 30
 
     gamma                   = 0.995
@@ -29,7 +29,7 @@ class Config:
     lambda_gae              = 0.9
     critic_loss_coeff       = 0.5
     # kl_threshold            = 0.025
-    kl_threshold            = 0.1
+    kl_threshold            = 0.01
 
     @staticmethod
     def serialize():
@@ -67,6 +67,8 @@ def start(args):
         kl_threshold=Config.kl_threshold,
         device=device
     )
+
+    agent.policy.actor.max_log_std = 0.25
 
     # agent.action_mask = redis.get_action_mask()
 

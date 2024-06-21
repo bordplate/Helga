@@ -22,7 +22,7 @@ class PPOAgent:
                  cl_coeff=0.5,
                  max_grad_norm=0.5,
                  beta=0.1,
-                 kl_threshold=0.01,
+                 kl_threshold=0.1,
                  lambda_gae=0.95,
                  device='cpu'
                  ):
@@ -121,8 +121,8 @@ class PPOAgent:
                     entropy_loss = dist_entropy.sum(dim=1).mean()
                     total_entropy_loss += entropy_loss.item()
 
-                    approx_kl = (old_logprobs - logprobs).mean()
-                    total_approx_kl += approx_kl.item()
+                    approx_kl = -((logprobs - old_logprobs).mean())
+                    total_approx_kl += abs(approx_kl.item())
                     count += 1
 
                     loss = actor_loss - self.ent_coef * entropy_loss + self.cl_coeff * critic_loss

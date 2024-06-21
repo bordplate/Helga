@@ -330,7 +330,7 @@ class HoverboardEnvironment(RatchetEnvironment):
                 print(f"Danger! State out of bounds: {s}. Value: {state_value}")
                 exit(0)
 
-        return np.array(state, dtype=np.float32), reward, terminal
+        return np.array(state, dtype=np.float16), reward, terminal
 
 
 # Just used for various tests of the environment

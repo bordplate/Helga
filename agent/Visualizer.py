@@ -33,8 +33,21 @@ screen = pygame.display.set_mode((screen_width, screen_height))
 pygame.display.set_caption("Action Visualization")
 
 font = pygame.font.Font(None, 24)
+bigger_font = pygame.font.Font("/usr/share/fonts/TTF/Hack-Bold.ttf", 36)
 
 state_values = deque(maxlen=400)
+
+
+def draw_score_and_checkpoint(score, checkpoint):
+    """
+    Draw the score and checkpoint on the screen.
+    """
+
+    score_label = bigger_font.render(f"Score: %.2f" % score, True, (255, 255, 255))
+    checkpoint_label = bigger_font.render(f"Checkpoint: {checkpoint}", True, (255, 255, 255))
+
+    screen.blit(score_label, (420, 500))
+    screen.blit(checkpoint_label, (420, 540))
 
 
 def draw_state_value_face(state_value):

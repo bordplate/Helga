@@ -57,7 +57,7 @@ class Watchdog:
 
         # Change the name of the running process so we can distinguish it from
 
-        time.sleep(10)
+        time.sleep(1)
 
         # thread = threading.Thread(target=self.run, args=())
         # thread.daemon = True

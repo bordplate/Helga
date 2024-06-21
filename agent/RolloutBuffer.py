@@ -66,8 +66,8 @@ class RolloutBuffer:
             self.ready = True
             return
 
-        state = torch.tensor(state, dtype=torch.float32).to(self.device)
-        reward = torch.tensor(reward, dtype=torch.float32, device=self.device)
+        state = torch.tensor(state, dtype=torch.bfloat16).to(self.device)
+        reward = torch.tensor(reward, dtype=torch.bfloat16, device=self.device)
         done = torch.tensor(done, dtype=torch.bool, device=self.device)
 
         self.lock.acquire()

@@ -145,7 +145,7 @@ class RedisHub:
     def get_action_mask(self):
         mask = self.redis.get("rac1.fitness-course.action_mask")
         if mask is not None:
-            return torch.tensor(pickle.loads(mask), dtype=torch.float32, device=self.device)
+            return torch.tensor(pickle.loads(mask), dtype=torch.bfloat16, device=self.device)
 
         return None
 

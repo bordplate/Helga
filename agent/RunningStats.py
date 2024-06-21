@@ -4,8 +4,8 @@ import torch
 
 class RunningStats:
     def __init__(self, epsilon=1e-4, shape=()):
-        self.mean = np.zeros(shape, 'float32')
-        self.var = np.ones(shape, 'float32')
+        self.mean = np.zeros(shape, 'float16')
+        self.var = np.ones(shape, 'float16')
         self.count = epsilon
 
     def update(self, x):

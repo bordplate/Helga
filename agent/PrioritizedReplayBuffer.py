@@ -30,11 +30,11 @@ class PrioritizedReplayBuffer:
     def add(self, state, actions, reward, next_state, done, logprob, state_value, next_hidden_state, next_cell_state):
         max_priority = self.max_priority
 
-        state = torch.tensor(state, dtype=torch.float32)
+        state = torch.tensor(state, dtype=torch.float16)
         #state_value = torch.tensor(state_value, dtype=torch.float32)
         #action = torch.tensor(action, dtype=torch.int64)
-        reward = torch.tensor(reward, dtype=torch.float32)
-        next_state = torch.tensor(next_state, dtype=torch.float32)
+        reward = torch.tensor(reward, dtype=torch.float16)
+        next_state = torch.tensor(next_state, dtype=torch.float16)
         done = torch.tensor(done, dtype=torch.bool)
 
         next_hidden_state = next_hidden_state
@@ -89,7 +89,7 @@ class PrioritizedReplayBuffer:
         total = buffer_len
         weights = (total * probabilities[indices]) ** (-beta)
         weights /= weights.max()
-        weights = np.array(weights, dtype=np.float32)
+        weights = np.array(weights, dtype=np.float16)
 
         batch = FullTransition(*zip(*samples))
         states, actions, rewards, next_states, dones, logprobs, state_values = map(lambda x: torch.stack(x).to(self.device), batch[:-4])

@@ -277,7 +277,7 @@ class VidcomicEnvironment(RatchetEnvironment):
             *collision_types,
         ]
 
-        return np.array(state, dtype=np.float32), reward, terminal
+        return np.array(state, dtype=np.float16), reward, terminal
 
 
 # Just used for various tests of the environment

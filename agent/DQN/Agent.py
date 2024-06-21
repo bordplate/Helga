@@ -26,11 +26,11 @@ class Agent:
         self.Q_target.freeze()
         self.update_target_network()
 
-        self.state_memory = np.zeros((self.mem_size, self.sequence_length, input_dims), dtype=np.float32)
-        self.new_state_memory = np.zeros((self.mem_size, self.sequence_length, input_dims), dtype=np.float32)
+        self.state_memory = np.zeros((self.mem_size, self.sequence_length, input_dims), dtype=np.float16)
+        self.new_state_memory = np.zeros((self.mem_size, self.sequence_length, input_dims), dtype=np.float16)
 
-        self.action_memory = np.zeros(self.mem_size, dtype=np.int32)
-        self.reward_memory = np.zeros(self.mem_size, dtype=np.float32)
+        self.action_memory = np.zeros(self.mem_size, dtype=np.int16)
+        self.reward_memory = np.zeros(self.mem_size, dtype=np.float16)
         self.terminal_memory = np.zeros(self.mem_size, dtype=bool)
 
         self.keyframe_size = [0] * self.mem_size

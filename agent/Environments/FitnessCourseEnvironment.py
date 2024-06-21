@@ -98,6 +98,10 @@ class FitnessCourseEnvironment(RatchetEnvironment):
 
             time.sleep(1)
 
+        while self.game.get_death_count() <= 0:
+            self.game.set_player_position(Vector3(0, 0, -10000))
+            self.game.frame_advance(4)
+
         # Reset variables that we use to keep track of the episode state and statistics
         self.stalled_timer = 0
         self.distance = 0.0
@@ -129,10 +133,10 @@ class FitnessCourseEnvironment(RatchetEnvironment):
 
         # 70% chance to spawn at random checkpoint, 30% in evaluation mode
         # if np.random.rand() < (0.7 if not self.eval_mode else 0.25):
-        if np.random.rand() < 0.7:
-            checkpoint = np.random.randint(0, len(self.checkpoints))
-            spawn_position = self.checkpoints_template[checkpoint]
-            self.checkpoint = (checkpoint + 1) % len(self.checkpoints)
+        # if np.random.rand() < 0.7:
+        #     checkpoint = np.random.randint(0, len(self.checkpoints))
+        #     spawn_position = self.checkpoints_template[checkpoint]
+        #     self.checkpoint = (checkpoint + 1) % len(self.checkpoints)
 
         self.game.set_player_position(spawn_position)
         self.game.set_player_rotation(Vector3(0, 0, -2.5))
@@ -456,7 +460,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         #         print(f"Danger! State out of bounds: {s}. Value: {state_value}")
         #         exit(0)
 
-        return torch.tensor(state, dtype=torch.float32, device=self.device), reward, terminal
+        return torch.tensor(state, dtype=torch.bfloat16, device=self.device), reward, terminal
 
 
 # Just used for various tests of the environment
