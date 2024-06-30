@@ -7,7 +7,7 @@ from threading import Lock
 
 
 class RolloutBuffer:
-    def __init__(self, owner, capacity, batch_size=512, gamma=0.99, lambda_gae=1, device='cpu'):
+    def __init__(self, owner, capacity, buffer_size=512, gamma=0.99, lambda_gae=1, device='cpu', cell_size=512):
         self.owner = owner
         self.capacity = capacity
         self.buffer = [None] * capacity
@@ -20,11 +20,14 @@ class RolloutBuffer:
         self.lambda_gae = lambda_gae
         self.cached = [None] * self.capacity
 
-        self.batch_size = batch_size
+        self.buffer_size = buffer_size
 
         self.ready = False
 
         self.discounted_reward = 0
+
+        self.hidden_state = torch.zeros((4, cell_size), dtype=torch.bfloat16, device='cpu')
+        self.cell_state = torch.zeros((4, cell_size), dtype=torch.bfloat16, device='cpu')
 
         self.device = device
 
@@ -57,22 +60,25 @@ class RolloutBuffer:
 
         self.last_episode_start = self.total
 
-    def add(self, state, actions, reward, done, logprob, state_value):
+    def add(self, state, actions, reward, done, logprob, state_value, cell_state, hidden_state):
         if self.ready:
             return
 
-        if self.total >= self.batch_size:
-            self.compute_returns_and_advantages(state_value, done)
+        if self.total >= self.buffer_size:
+            self.compute_returns_and_advantages(state_value.to('cpu'), done)
             self.ready = True
             return
 
-        state = torch.tensor(state, dtype=torch.bfloat16).to(self.device)
-        reward = torch.tensor(reward, dtype=torch.bfloat16, device=self.device)
-        done = torch.tensor(done, dtype=torch.bool, device=self.device)
+        state = state.to('cpu')
+        actions = actions.to('cpu')
+        reward = torch.tensor(reward, dtype=torch.bfloat16, device='cpu')
+        done = torch.tensor(done, dtype=torch.bool, device='cpu')
+        logprob = logprob.to('cpu')
+        state_value = state_value.to('cpu')
 
         self.lock.acquire()
 
-        self.buffer[self.position] = (state, actions, reward, done, logprob, state_value)
+        self.buffer[self.position] = (state, actions, reward, done, logprob, state_value, cell_state.to('cpu'), hidden_state.to('cpu'))
 
         self.position = (self.position + 1) % self.capacity
         self.lock.release()
@@ -99,14 +105,14 @@ class RolloutBuffer:
 
         :returns: Tensor of states, actions, rewards, dones, logprobs, state_values, hidden_states, cell_states
         """
-        num_samples = min(self.total, 30000)
+        num_samples = self.total
 
         # Make num samples a multiple of batch size
         num_samples = num_samples - (num_samples % batch_size)
 
         # List of indices into self.buffer at batch_size intervals
         indices = list(range(0, num_samples, batch_size))
-        # random.shuffle(indices)
+        random.shuffle(indices)
 
         for i in indices:
             if self.cached[i] is not None:
@@ -124,16 +130,17 @@ class RolloutBuffer:
 
     def _process_batch(self, batch):
         with torch.no_grad():
-            (states, actions, rewards, dones, logprobs, state_values, advantages, returns) \
+            (states, actions, rewards, dones, logprobs, state_values, cell_states, hidden_states, advantages, returns) \
                 = zip(*batch)
 
-            states = torch.stack(states).to(self.device)
-            actions = torch.stack(actions).to(self.device)
-            rewards = torch.stack(rewards).to(self.device)
-            dones = torch.stack(dones).to(self.device)
-            logprobs = torch.stack(logprobs).to(self.device)
-            state_values = torch.stack(state_values).to(self.device)
-            advantages = torch.stack(advantages).to(self.device)
-            returns = torch.stack(returns).to(self.device)
+            states = torch.stack(states)
+            actions = torch.stack(actions)
+            rewards = torch.stack(rewards)
+            dones = torch.stack(dones)
+            logprobs = torch.stack(logprobs)
+            hidden_states = torch.stack(hidden_states)
+            cell_states = torch.stack(cell_states)
+            advantages = torch.stack(advantages)
+            returns = torch.stack(returns)
 
-            return states, actions, rewards, dones, logprobs, state_values, advantages, returns
+            return [states, actions, rewards, dones, logprobs, cell_states, hidden_states, advantages, returns]

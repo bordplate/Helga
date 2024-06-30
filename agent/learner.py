@@ -13,21 +13,22 @@ from util import update_graph_html
 
 
 class Config:
-    learning_rate_critic    = 1e-6
-    learning_rate_actor     = 1e-6
+    learning_rate_critic    = 3e-4
+    learning_rate_actor     = 3e-4
     features                = 27 + 128
     actions                 = 7
-    batch_size              = 768 * 10
-    mini_batch_size         = 768
+    buffer_size             = 1024 * 64
+    batch_size              = 1024 * 16
+    mini_batch_size         = 1024
     sequence_length         = 30
 
     gamma                   = 0.995
     K_epochs                = 10
     eps_clip                = 0.2
     log_std                 = -1.0
-    ent_coef                = 0.0001
+    ent_coef                = 0.001
     lambda_gae              = 0.9
-    critic_loss_coeff       = 0.5
+    critic_loss_coeff       = 1.0
     # kl_threshold            = 0.025
     kl_threshold            = 0.01
 
@@ -49,12 +50,16 @@ def start(args):
     # redis = redis_from_url(f"redis://{args.redis_host}:{args.redis_port}")
     redis = RedisHub(f"redis://{args.redis_host}:{args.redis_port}", "rac1.fitness-course.rollout_buffer", device=device)
 
+    # Unblock potentially stale workers
+    redis.unblock_workers()
+
     # Create an agent
     agent = PPOAgent(
         state_dim=Config.features,
         action_dim=Config.actions,
         lr_actor=Config.learning_rate_actor,
         lr_critic=Config.learning_rate_critic,
+        buffer_size=Config.buffer_size,
         batch_size=Config.batch_size,
         mini_batch_size=Config.mini_batch_size,
         gamma=Config.gamma,
@@ -68,7 +73,7 @@ def start(args):
         device=device
     )
 
-    agent.policy.actor.max_log_std = 0.25
+    agent.policy.actor.max_log_std = 0.8
 
     # agent.action_mask = redis.get_action_mask()
 
@@ -86,6 +91,12 @@ def start(args):
 
             # Save our current model to Redis
             redis.save_model(agent)
+        else:
+            print("Restored model from Redis")
+
+            # Reapply learning rate to optimizer
+            agent.optimizer.param_groups[0]['lr'] = Config.learning_rate_actor
+            agent.optimizer.param_groups[1]['lr'] = Config.learning_rate_critic
 
     if args.wandb:
         current_run_id = redis.redis.get("rac1.fitness-course.wandb_run_id")
@@ -170,7 +181,7 @@ def start(args):
                       'policy_loss: %.2f' % np.mean(policy_losses[-100:]),
                       'value_loss: %.2f' % np.mean(value_losses[-100:]),
                       'entropy_loss: %.2f' % np.mean(entropy_losses[-100:]),
-                      'kl_div: %.2f' % last_kl_div,
+                      'kl_div: %.5f' % last_kl_div,
                 )
 
                 # log_std_params = [ "%.5f" % x for x in agent.policy.actor.log_std.squeeze().tolist() ]

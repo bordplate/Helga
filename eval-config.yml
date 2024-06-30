@@ -158,7 +158,7 @@ Video:
     Darkening effect strength: 30
     Blur effect strength: 0
 Audio:
-  Renderer: "Null"
+  Renderer: Cubeb
   Audio Provider: CellAudio
   RSXAudio Avport: HDMI 0
   Dump to file: false
@@ -166,7 +166,7 @@ Audio:
   Audio Format: Stereo
   Audio Formats: 0
   Audio Channel Layout: Automatic
-  Audio Device: "@@@default@@@"
+  Audio Device: alsa_output.pci-0000_01_00.1.hdmi-stereo
   Master Volume: 100
   Enable Buffering: true
   Desired Audio Buffer Duration: 100

@@ -72,12 +72,15 @@ def start_worker(args):
         pass
         # Draws a visualization of the actions and other information
         import Visualizer
-        # import Plotter
-        # Plotter.start_plotting()
 
-        agent.policy.actor.max_log_std = 0.25
+        if "pydevd" not in sys.modules:
+            import Plotter
+            Plotter.start_plotting()
+
+        # agent.policy.actor.max_log_std = 0.0000001
+        agent.policy.actor.max_log_std = 0.8
     else:
-        agent.policy.actor.max_log_std = 0.25
+        agent.policy.actor.max_log_std = 0.8
 
     total_steps = 0
     episodes = 0
@@ -115,6 +118,9 @@ def start_worker(args):
                 if new_model is not None:
                     agent.load_policy_dict(new_model)
 
+            # old_hidden_state = agent.policy.actor.hidden_state.clone().detach()
+            # old_cell_state = agent.policy.actor.cell_state.clone().detach()
+
             # actions, logprob, state_value = (torch.zeros(7), torch.zeros(1), torch.zeros(1))
             actions, logprob, state_value = agent.choose_action(state_sequence.unsqueeze(dim=0))
             actions = actions.to(dtype=torch.float32).squeeze().cpu()
@@ -128,15 +134,16 @@ def start_worker(args):
 
             # Give some run-in time before we start evaluating the model so state observations are normalized properly
             if not eval_mode:
-                redis.add(state_sequence, actions, reward, last_done, logprob, state_value)
+                redis.add(state_sequence, actions, reward, last_done, logprob, state_value, agent.policy.actor.hidden_state, agent.policy.actor.cell_state)
             elif eval_mode:
                 # Visualize the actions
                 Visualizer.draw_state_value_face(state_value)
                 Visualizer.draw_score_and_checkpoint(accumulated_reward, env.n_checkpoints)
                 Visualizer.render_raycast_data(np.float16(env.game.get_collisions(normalized=False)))
                 Visualizer.draw_bars(actions, state_value, time_left/30)
-            #
-            #     Plotter.add_data(state_value.item(), reward)
+
+                if "pydevd" not in sys.modules:
+                    Plotter.add_data(state_value.item(), reward)
 
             # Roll the state sequence and append the new normalized state
             new_state_sequence = torch.roll(state_sequence, -1, 0)

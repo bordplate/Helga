@@ -12,6 +12,7 @@ class PPOAgent:
                  action_dim,
                  lr_actor=1e-4,
                  lr_critic=1e-4,
+                 buffer_size=1024 * 32,
                  batch_size=1024 * 8,
                  mini_batch_size=1024,
                  gamma=0.99,
@@ -38,13 +39,14 @@ class PPOAgent:
 
         self.device = device
 
+        self.buffer_size = buffer_size
         self.mini_batch_size = mini_batch_size
         self.batch_size = batch_size
         self.replay_buffers = []
 
         self.random_encoder = RandomEncoder(state_dim).to(device)
 
-        self.policy = ActorCritic(state_dim, action_dim, log_std).to(device)
+        self.policy = ActorCritic(state_dim, action_dim, log_std, device)
 
         self.action_mask = torch.ones(action_dim).to(device)
 
@@ -56,7 +58,7 @@ class PPOAgent:
         self.mse_loss = nn.MSELoss()
 
     def start_new_episode(self):
-        pass
+        self.policy.start_new_episode()
 
     def load_policy_dict(self, policy):
         self.policy.load_state_dict(policy)
@@ -82,73 +84,100 @@ class PPOAgent:
 
         count = 0
 
+        old_params = self.policy.actor.named_parameters()
+        old_params = {k: v.clone() for k, v in old_params}
+
         # Optimize policy for K epochs
         for epoch in range(self.K_epochs):
             for (n, buffer) in enumerate(self.replay_buffers):
-                for (states, actions, _rewards, dones, old_logprobs, old_state_values,
-                        advantages, returns) in buffer.get_batches(self.mini_batch_size):
-
-                    # Evaluating old actions and values
-                    logprobs, state_values, dist_entropy = self.policy.evaluate(states, actions, self.action_mask)
-                    # source_y_t = self.random_encoder(states[:, -1, :].squeeze())
-
-                    # intrinsic_rewards = self.random_encoder.compute_intrinsic_rewards(source_y_t[:, :, 0, 0], y_t.squeeze(), True)
-                    # intrinsic_rewards = intrinsic_rewards.squeeze().to(device)
-
-                    advantages = advantages.squeeze().detach()
-                    returns = returns.squeeze().detach()
-                    old_logprobs = old_logprobs.squeeze(dim=1).detach()
-
-                    # advantages = advantages + self.beta * intrinsic_rewards
-                    # returns = returns + self.beta * intrinsic_rewards
-
-                    # Finding the ratio (pi_theta / pi_theta__old)
-                    ratios = torch.exp(logprobs.sum(dim=1) - old_logprobs.sum(dim=1))
-                    # ratios = torch.exp(logprobs - old_logprobs.squeeze(dim=1).detach())
-
-                    # Normalizing the advantages
-                    # advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-10)
-
-                    surr1 = advantages * ratios
-                    surr2 = advantages * torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip)
-
-                    actor_loss = -(torch.min(surr1, surr2)).mean()
-                    critic_loss = self.mse_loss(state_values.squeeze(), returns.squeeze())
-
-                    total_policy_loss += actor_loss.item()
-                    total_value_loss += critic_loss.item()
-
-                    entropy_loss = dist_entropy.sum(dim=1).mean()
-                    total_entropy_loss += entropy_loss.item()
-
-                    approx_kl = -((logprobs - old_logprobs).mean())
-                    total_approx_kl += abs(approx_kl.item())
-                    count += 1
-
-                    loss = actor_loss - self.ent_coef * entropy_loss + self.cl_coeff * critic_loss
-
+                for batch in buffer.get_batches(self.batch_size):
                     self.optimizer.zero_grad()
-                    loss.backward()
-                    total_loss += loss.item()
+
+                    for slice in range(0, self.batch_size, self.mini_batch_size):
+                        batch_slice = [item[slice:slice + self.mini_batch_size] for item in batch]
+
+                        (states, actions, _rewards, dones, old_logprobs,
+                         cell_states, hidden_states, advantages, returns) = zip(batch_slice)
+
+                        states = states[0].clone().to(self.device)
+                        actions = actions[0].clone().to(self.device)
+                        old_logprobs = old_logprobs[0].clone().to(self.device)
+                        advantages = advantages[0].clone().to(self.device)
+                        returns = returns[0].clone().to(self.device)
+                        hidden_states = hidden_states[0].clone().permute(1, 0, 2).to(self.device)
+                        cell_states = cell_states[0].clone().permute(1, 0, 2).to(self.device)
+
+                        # Evaluating old actions and values
+                        logprobs, state_values, dist_entropy = self.policy.evaluate(states, actions, self.action_mask, hidden_states.detach(), cell_states.detach())
+                        # source_y_t = self.random_encoder(states[:, -1, :].squeeze())
+
+                        # intrinsic_rewards = self.random_encoder.compute_intrinsic_rewards(source_y_t[:, :, 0, 0], y_t.squeeze(), True)
+                        # intrinsic_rewards = intrinsic_rewards.squeeze().to(device)
+
+                        advantages = advantages.squeeze().detach()
+                        returns = returns.squeeze().detach()
+                        old_logprobs = old_logprobs.squeeze(dim=1).detach()
+
+                        # advantages = advantages + self.beta * intrinsic_rewards
+                        # returns = returns + self.beta * intrinsic_rewards
+
+                        # Finding the ratio (pi_theta / pi_theta__old)
+                        ratios = torch.exp(logprobs.sum(dim=1) - old_logprobs.sum(dim=1))
+                        # ratios = torch.exp(logprobs - old_logprobs.squeeze(dim=1).detach())
+
+                        # Normalizing the advantages
+                        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-10)
+
+                        surr1 = advantages * ratios
+                        surr2 = advantages * torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip)
+
+                        actor_loss = -(torch.min(surr1, surr2)).mean()
+                        critic_loss = self.mse_loss(state_values.squeeze(), returns.squeeze())
+
+                        total_policy_loss += actor_loss.item()
+                        total_value_loss += critic_loss.item()
+
+                        entropy_loss = dist_entropy.sum(dim=1).mean()
+                        total_entropy_loss += entropy_loss.item()
+
+                        approx_kl = -((logprobs - old_logprobs).mean())
+                        total_approx_kl += abs(approx_kl.item())
+                        count += 1
+
+                        loss = actor_loss - self.ent_coef * entropy_loss + self.cl_coeff * critic_loss
+
+                        loss.backward()
+                        total_loss += loss.item()
+
+                        total_loss += loss.item()
+
+                        # Stop early if kl_divergence is above threshold
+                        if total_approx_kl / count > self.kl_threshold:
+                            print(f"Stopping early in {n}:{epoch}:{count} due to high KL divergence: {total_approx_kl / count }")
+                            break
 
                     # Clip the gradients
                     nn.utils.clip_grad_norm_(self.policy.actor.parameters(), self.max_grad_norm)
-                    self.optimizer.step()
 
-                    # Stop early if kl_divergence is above threshold
-                    if total_approx_kl / count > self.kl_threshold:
-                        print(f"Stopping early in {n}:{epoch}:{count} due to high KL divergence: {total_approx_kl / count }")
-                        break
+                    self.optimizer.step()
 
                 # Stop early if kl_divergence is above threshold
                 if total_approx_kl / count > self.kl_threshold:
+                    print("Lol. Lmao even")
                     break
 
             # Stop early if kl_divergence is above threshold
             if total_approx_kl / count > self.kl_threshold:
+                print("Lmao")
                 break
 
         torch.cuda.empty_cache()
+
+        # Print difference for all parameters
+        for name, param in self.policy.actor.named_parameters():
+            if name in old_params:
+                diff = (param - old_params[name]).abs().sum().item()
+                print(f"Param: {name}, diff: {diff}")
 
         # Clear the buffers
         for buffer in self.replay_buffers:

@@ -16,7 +16,7 @@ from RolloutBuffer import RolloutBuffer
 
 
 Transition = namedtuple('Transition', ('state', 'action', 'reward',
-                                       'done',  'logprob', 'state_value'))
+                                       'done',  'logprob', 'state_value', 'hidden_state', 'cell_state'))
 TransitionMessage = namedtuple('TransitionMessage', ('transition', 'worker_name'))
 
 
@@ -35,8 +35,8 @@ class RedisHub:
         # Randomly generate worker ID
         self.worker_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
-    def add(self, state_sequence, actions, reward, last_done, logprob, state_value):
-        transition = Transition(state_sequence, actions, reward, last_done, logprob, state_value)
+    def add(self, state_sequence, actions, reward, last_done, logprob, state_value, hidden_state, cell_state):
+        transition = Transition(state_sequence, actions, reward, last_done, logprob, state_value, hidden_state.squeeze(), cell_state.squeeze())
         message = TransitionMessage(transition, self.worker_id)
 
         # Pickle the transition and publish it to the "replay_buffer" channel
@@ -130,12 +130,20 @@ class RedisHub:
 
         return False
 
+    def unblock_workers(self):
+        self.redis.publish("unblock_workers", "Doit")
+
     def check_buffer_full(self):
         if self.pubsub is None:
             self.pubsub = self.redis.pubsub()
             self.pubsub.subscribe(f"{self.worker_id}.full")
+            self.pubsub.subscribe("unblock_workers")
 
         message = self.pubsub.get_message(ignore_subscribe_messages=True)
+
+        # If we get message on the 'unblock_workers' we should set buffer_full to False
+        if message is not None and message["channel"].decode() == "unblock_workers":
+            self.buffer_full = False
 
         if message is not None:
             self.buffer_full = True if message["data"].decode() == "True" else False
@@ -195,7 +203,7 @@ class RedisHub:
                         if data.worker_name in buffers:
                             replay_buffer = buffers[data.worker_name]
                         else:
-                            buffers[data.worker_name] = RolloutBuffer(data.worker_name, 1000000, agent.batch_size, agent.gamma,
+                            buffers[data.worker_name] = RolloutBuffer(data.worker_name, 1000000, agent.buffer_size, agent.gamma,
                                                                       agent.lambda_gae, device=agent.device)
                             agent.replay_buffers.append(buffers[data.worker_name])
                             replay_buffer = buffers[data.worker_name]
@@ -206,8 +214,13 @@ class RedisHub:
                             transition.reward,
                             transition.done,
                             transition.logprob,
-                            transition.state_value
+                            transition.state_value,
+                            replay_buffer.hidden_state,
+                            replay_buffer.cell_state
                         )
+
+                        replay_buffer.hidden_state = transition.hidden_state
+                        replay_buffer.cell_state = transition.cell_state
 
                         # If the replay buffer is full, we need to notify the worker to stop sending messages
                         if replay_buffer.ready:

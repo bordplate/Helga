@@ -271,7 +271,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         if distance_from_checkpoint < pre_distance_from_checkpoint and distance_from_checkpoint < self.closest_distance_to_checkpoint:
             dist = pre_distance_from_checkpoint - distance_from_checkpoint
             if dist < 10 and dist > 0.01:
-                reward += self.reward("distance_from_checkpoint_reward", (pre_distance_from_checkpoint - distance_from_checkpoint) * 0.5)
+                reward += self.reward("distance_from_checkpoint_reward", (pre_distance_from_checkpoint - distance_from_checkpoint))
 
                 self.frames_moving_away_from_checkpoint = 0
         # elif distance_from_checkpoint < pre_distance_from_checkpoint:
@@ -303,8 +303,8 @@ class FitnessCourseEnvironment(RatchetEnvironment):
 
             self.game.set_checkpoint_position(self.checkpoints[self.checkpoint])
 
-        if distance_from_checkpoint > self.closest_distance_to_checkpoint + 10:
-            reward += self.reward("moving_away_from_checkpoint_penalty", -0.05)
+        if distance_from_checkpoint > self.closest_distance_to_checkpoint + 10 and pre_distance_from_checkpoint < distance_from_checkpoint:
+            reward += self.reward("moving_away_from_checkpoint_penalty", -0.1)
 
         # Various speed related rewards and penalties
 
