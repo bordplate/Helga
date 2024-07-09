@@ -7,7 +7,7 @@ from threading import Lock
 
 
 class RolloutBuffer:
-    def __init__(self, owner, capacity, buffer_size=512, gamma=0.99, lambda_gae=1, device='cpu', cell_size=512):
+    def __init__(self, owner, capacity, buffer_size=512, gamma=0.99, lambda_gae=1, device='cpu', cell_size=256):
         self.owner = owner
         self.capacity = capacity
         self.buffer = [None] * capacity
@@ -26,8 +26,8 @@ class RolloutBuffer:
 
         self.discounted_reward = 0
 
-        self.hidden_state = torch.zeros((4, cell_size), dtype=torch.bfloat16, device='cpu')
-        self.cell_state = torch.zeros((4, cell_size), dtype=torch.bfloat16, device='cpu')
+        #self.hidden_state = torch.zeros((cell_size), dtype=torch.bfloat16, device='cpu')
+        #self.cell_state = torch.zeros((cell_size), dtype=torch.bfloat16, device='cpu')
 
         self.device = device
 
@@ -60,7 +60,7 @@ class RolloutBuffer:
 
         self.last_episode_start = self.total
 
-    def add(self, state, actions, reward, done, logprob, state_value, cell_state, hidden_state):
+    def add(self, state, actions, reward, done, logprob, state_value, hidden_state, cell_state):
         if self.ready:
             return
 
@@ -78,7 +78,8 @@ class RolloutBuffer:
 
         self.lock.acquire()
 
-        self.buffer[self.position] = (state, actions, reward, done, logprob, state_value, cell_state.to('cpu'), hidden_state.to('cpu'))
+        self.buffer[self.position] = (state, actions, reward, done, logprob, state_value, None, None)
+        # self.buffer[self.position] = (state, actions, reward, done, logprob, state_value, hidden_state.to('cpu').unsqueeze(dim=0), cell_state.to('cpu').unsqueeze(dim=0))
 
         self.position = (self.position + 1) % self.capacity
         self.lock.release()
@@ -130,7 +131,7 @@ class RolloutBuffer:
 
     def _process_batch(self, batch):
         with torch.no_grad():
-            (states, actions, rewards, dones, logprobs, state_values, cell_states, hidden_states, advantages, returns) \
+            (states, actions, rewards, dones, logprobs, state_values, hidden_states, cell_states, advantages, returns) \
                 = zip(*batch)
 
             states = torch.stack(states)
@@ -138,9 +139,10 @@ class RolloutBuffer:
             rewards = torch.stack(rewards)
             dones = torch.stack(dones)
             logprobs = torch.stack(logprobs)
-            hidden_states = torch.stack(hidden_states)
-            cell_states = torch.stack(cell_states)
+            # hidden_states = torch.stack(hidden_states)
+            # cell_states = torch.stack(cell_states)
             advantages = torch.stack(advantages)
             returns = torch.stack(returns)
 
-            return [states, actions, rewards, dones, logprobs, cell_states, hidden_states, advantages, returns]
+            return [states, actions, rewards, dones, logprobs, advantages, returns]
+            # return [states, actions, rewards, dones, logprobs, hidden_states, cell_states, advantages, returns]

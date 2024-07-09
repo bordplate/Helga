@@ -3,6 +3,7 @@ import struct
 
 import numpy as np
 
+from Game.LinuxProcess import Process
 from Game.Game import Game, Vector3
 
 
@@ -22,7 +23,8 @@ class RC1Game(Game):
     dist_from_ground_address = 0x969fbc
     player_speed_address = 0x969e74
     current_planet_address = 0x969C70
-    nanotech_address = 0x96BF8B
+    nanotech_address = 0x96BF88
+    max_nanotech_address = 0x71fb28
     items_address = 0x96C140
 
     collisions_address = 0xB00100
@@ -122,15 +124,25 @@ class RC1Game(Game):
 
         return player_state
 
+    def get_nanotech(self):
+        nanotech = self.process.read_int(self.nanotech_address)
+
+        return nanotech
+
+    def get_max_nanotech(self):
+        return self.process.read_int(self.max_nanotech_address)
+
     def set_nanotech(self, nanotech):
         """
         Nanotech is health in Ratchet & Clank.
         """
-        self.process.write_byte(self.nanotech_address, nanotech)
+        self.process.write_int(self.nanotech_address, nanotech)
+
+    def set_max_nanotech(self, value):
+        self.process.write_int(self.max_nanotech_address, value)
 
     def set_player_state(self, state):
         self.process.write_int(self.player_state_address, state)
-
 
     def get_distance_from_ground(self):
         return self.process.read_float(self.dist_from_ground_address)
@@ -287,20 +299,26 @@ class RC1Game(Game):
         collisions = []
         classes = []
 
+        # Fetch all the memory we need in one go
+        collision_memory = self.process.read_memory(self.collisions_address, 0x200)
+        # class_memory = self.process.read_memory(self.collisions_class_address, 64 * 4)
+
         # 8 rows, 8 columns
         for i in range(8):
             for j in range(8):
                 offset = 4 * (i * 8 + j)
 
-                collision_address = self.collisions_address + offset
-                collision_value = self.process.read_float(collision_address)
+                # collision_address = self.collisions_address + offset
+                # collision_value = self.process.read_float(collision_address)
+                collision_value = Process.read_float_from_buffer(collision_memory, offset)
 
-                class_address = self.collisions_class_address + offset
-                class_value = self.process.read_int(class_address)
+                # class_address = self.collisions_class_address + offset
+                # class_value = self.process.read_int(class_address)
+                class_value = Process.read_int_from_buffer(collision_memory, 0x100 + offset, signed=True)
 
                 if normalized:
                     collision_value = np.interp(collision_value, [-32, 64], [-1, 1])
-                    class_value = np.interp(class_value, [-2, 4096], [-1, 1])
+                    class_value = np.interp(class_value, [-64, 4096], [-1, 1])
 
                 collisions.append(collision_value)
                 classes.append(class_value)
@@ -320,11 +338,11 @@ class RC1Game(Game):
                 collision_value = self.process.read_float(collision_address)
 
                 class_address = self.collisions_class_address + offset
-                class_value = self.process.read_int(class_address)
+                class_value = self.process.read_int(class_address, signed=True)
 
                 if normalized:
                     collision_value = np.interp(collision_value, [-32, 64], [-1, 1])
-                    class_value = np.interp(class_value, [-2, 4096], [-1, 1])
+                    class_value = np.interp(class_value, [-128, 4096], [-1, 1])
 
                 (oscillation_offset_x, oscillation_offset_y) = self.get_oscillation_offset()
 
@@ -337,7 +355,7 @@ class RC1Game(Game):
         # Flatten and return self.collisions_render and self.mobys_render
         return [*self.collisions_render.copy().flatten(), *self.mobys_render.copy().flatten()]
 
-    def get_collisions_with_normals(self):
+    def get_collisions_with_normals(self, normalized=True):
         collisions = []
         normals_x = []
         normals_y = []
@@ -362,7 +380,38 @@ class RC1Game(Game):
                 normal_z = self.process.read_float(normal_z_address)
 
                 class_address = self.collisions_class_address + offset
-                class_value = self.process.read_int(class_address)
+                class_value = self.process.read_int(class_address, signed=True)
+
+                # DEBUG: Need to figure out maximum and minimum values for normals
+                # if not hasattr(self, 'max_normal_x'):
+                #     self.max_normal_x = normal_x
+                #     self.min_normal_x = normal_x
+                #
+                # if normal_x > self.max_normal_x:
+                #     self.max_normal_x = normal_x
+                #     print(f"New max normal x: {self.max_normal_x}")
+                #     print(f"Min: {self.min_normal_x}, Max: {self.max_normal_x}")
+                #
+                # if normal_x < self.min_normal_x:
+                #     self.min_normal_x = normal_x
+                #     print(f"New min normal x: {self.min_normal_x}")
+                #     print(f"Min: {self.min_normal_x}, Max: {self.max_normal_x}")
+
+                # Min: -217395200.0, Max: 153303040.0
+
+                max = 471982336.0
+                min = -471982336.0
+
+                assert min <= normal_x <= max, f"Normal x: {normal_x}"
+                assert min <= normal_y <= max, f"Normal y: {normal_y}"
+                assert min <= normal_z <= max, f"Normal z: {normal_z}"
+
+                if normalized:
+                    collision_value = np.interp(collision_value, [-32, 64], [-1, 1])
+                    normal_x = np.interp(normal_x, [min, max], [-1, 1])
+                    normal_y = np.interp(normal_y, [min, max], [-1, 1])
+                    normal_z = np.interp(normal_z, [min, max], [-1, 1])
+                    class_value = np.interp(class_value, [-128, 4096], [-1, 1])
 
                 collisions.append(collision_value)
                 normals_x.append(normal_x)
@@ -370,7 +419,7 @@ class RC1Game(Game):
                 normals_z.append(normal_z)
                 classes.append(class_value)
 
-        return (collisions, classes, normals_x, normals_y, normals_z)
+        return [*collisions, *classes, *normals_x, *normals_y, *normals_z]
 
     def get_oscillation_offset(self):
         return (int(self.process.read_float(self.oscillation_offset_x_address)),

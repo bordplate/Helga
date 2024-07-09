@@ -13,14 +13,14 @@ from util import update_graph_html
 
 
 class Config:
-    learning_rate_critic    = 3e-4
-    learning_rate_actor     = 3e-4
-    features                = 27 + 128
+    learning_rate_critic    = 2e-4
+    learning_rate_actor     = 2e-4
+    features                = 28 + 128 + 64*3
     actions                 = 7
     buffer_size             = 1024 * 64
     batch_size              = 1024 * 16
     mini_batch_size         = 1024
-    sequence_length         = 30
+    sequence_length         = 1
 
     gamma                   = 0.995
     K_epochs                = 10
@@ -48,7 +48,7 @@ def start(args):
     commit = args.commit
 
     # redis = redis_from_url(f"redis://{args.redis_host}:{args.redis_port}")
-    redis = RedisHub(f"redis://{args.redis_host}:{args.redis_port}", "rac1.fitness-course.rollout_buffer", device=device)
+    redis = RedisHub(f"redis://{args.redis_host}:{args.redis_port}", "rac1.gaspar.rollout_buffer", device=device)
 
     # Unblock potentially stale workers
     redis.unblock_workers()
@@ -99,18 +99,18 @@ def start(args):
             agent.optimizer.param_groups[1]['lr'] = Config.learning_rate_critic
 
     if args.wandb:
-        current_run_id = redis.redis.get("rac1.fitness-course.wandb_run_id")
+        current_run_id = redis.redis.get("rac1.gaspar.wandb_run_id")
         current_run_id = current_run_id.decode() if current_run_id is not None else None
 
         wandb.init(
-            project="rac1-fitness-course",
+            project="rac1-gaspar",
             id=current_run_id,
             config=Config.serialize(),
             resume="must" if current_run_id is not None else None
         )
 
         # Set current wandb run in Redis
-        redis.redis.set("rac1.fitness-course.wandb_run_id", wandb.run.id)
+        redis.redis.set("rac1.gaspar.wandb_run_id", wandb.run.id)
 
         update_graph_html(wandb.run.get_url())
 
@@ -168,10 +168,10 @@ def start(args):
         # Updating model in Redis, log stuff for debub, make backups
         if steps % 1 == 0:
             # Get the last 100 scores from Redis key "avg_scores" and cast them to floats
-            scores = redis.redis.lrange("rac1.fitness-course.avg_scores", -100, -1)
+            scores = redis.redis.lrange("rac1.gaspar.avg_scores", -100, -1)
             scores = [float(score) for score in scores]
 
-            checkpoints = redis.redis.lrange("rac1.fitness-course.checkpoints", -100, -1)
+            checkpoints = redis.redis.lrange("rac1.gaspar.checkpoints", -100, -1)
             checkpoints = [float(checkpoint) for checkpoint in checkpoints]
 
             if len(losses) > 0:
@@ -189,8 +189,8 @@ def start(args):
 
             # Save the model every 15 steps
             if commit and steps % 15 == 0:
-                redis.save_model_to_file(agent, f"models_bak/rac1_fitness-course_{steps}.pth")
-                print(f"Saved model to models_bak/rac1_fitness-course_{steps}.pth")
+                redis.save_model_to_file(agent, f"models_bak/rac1_gaspar_{steps}.pth")
+                print(f"Saved model to models_bak/rac1_gaspar_{steps}.pth")
 
             if args.wandb:
                 wandb.log({

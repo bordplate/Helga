@@ -166,7 +166,7 @@ Audio:
   Audio Format: Stereo
   Audio Formats: 0
   Audio Channel Layout: Automatic
-  Audio Device: alsa_output.pci-0000_01_00.1.hdmi-stereo
+  Audio Device: alsa_output.pci-0000_0c_00.6.pro-output-0
   Master Volume: 100
   Enable Buffering: true
   Desired Audio Buffer Duration: 100

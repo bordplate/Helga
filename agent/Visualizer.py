@@ -105,14 +105,15 @@ def render_raycast_data(raycast_data):
     # mobys = np.repeat(mobys, 4, axis=1)
     # raycast_data = np.repeat(raycast_data, 4, axis=1)
 
-    mobys[mobys < 0] = 4096  # Mark non-colliding areas as maximum value
+    # mobys[mobys < 0] = 4096  # Mark non-colliding areas as maximum value
     raycast_data[raycast_data < 0] = 64  # Mark values below 0
 
     raycast_data = raycast_data / 64
     raycast_data = np.clip(raycast_data, 0, 1)
 
     # Invert the grayscale mapping: 0 -> 255 (white), 1 -> 0 (black)
-    grayscale_data = 1 - raycast_data
+    # distance_data is (8, 8)
+    distance_data = 1 - raycast_data
 
     # Create a color scale for mobys data
     colors = np.zeros((8, 8, 3), dtype=np.uint8)
@@ -121,8 +122,11 @@ def render_raycast_data(raycast_data):
     # Full color spectrum interpolation from red to white
     for i in range(8):
         for j in range(8):
-            if norm_mobys[i, j] < 1:
+            (r, g, b) = (255, 255, 255)
+
+            if norm_mobys[i, j] >= 0:
                 value = norm_mobys[i, j]
+
                 if value < 1/6:
                     r, g, b = 255, int(255 * 6 * value), 0
                 elif value < 2/6:
@@ -135,14 +139,31 @@ def render_raycast_data(raycast_data):
                     r, g, b = int(255 * (6 * value - 4)), 0, 255
                 else:
                     r, g, b = 255, 0, int(255 * (6 - 6 * value))
-                colors[i, j] = [r, g, b]
             else:
-                colors[i, j] = [255, 255, 0]
+                value = mobys[i, j]
 
-    # Apply grayscale where mobys are below 0 (now set to 4096)
-    mask = mobys >= 4096
-    grayscale_rgb = np.stack([grayscale_data] * 3, axis=-1) * 255
-    colors[mask] = grayscale_rgb[mask]
+                if value == -33:  # Ground
+                    (r, g, b) = (255, 255, 128)
+                elif value == -12:  # Walls?
+                    (r, g, b) = (200, 200, 0)
+                elif value == -14:  # More walls?
+                    (r, g, b) = (200, 200, 128)
+                elif value == -3:  # Lava
+                    (r, g, b) = (255, 0, 0)
+                elif value == -10 or value == -11:  # Different walls?
+                    (r, g, b) = (128, 128, 0)
+                elif value == -128:
+                    pass
+                else:
+                    print(f"Unknown value: {value}")
+
+            # Adjust brightness based on distance data
+            brightness = distance_data[i, j]
+            colors[i, j] = [r * brightness, g * brightness, b * brightness]
+
+    # mask = mobys < 0
+    # grayscale_rgb = np.stack([grayscale_data] * 3, axis=-1) * 255
+    # colors[mask] = grayscale_rgb[mask]
 
     # Flip and rotate as needed
     colors = np.flip(colors, axis=1)

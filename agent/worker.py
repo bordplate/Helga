@@ -5,6 +5,7 @@ import torch
 from RunningStats import RunningStats
 from Watchdog import Watchdog
 from Environments.FitnessCourseEnvironment import FitnessCourseEnvironment
+from Environments.GasparEnvironment import GasparEnvironment
 
 import numpy as np
 
@@ -12,8 +13,8 @@ from PPO.PPOAgent import PPOAgent
 
 from RedisHub import RedisHub
 
-features = 27 + 128
-sequence_length = 30
+features = 28 + 128 + 64*3
+sequence_length = 1
 
 configuration = {
     "model": None,
@@ -50,12 +51,12 @@ def start_worker(args):
     else:
         # Find the rpcs3 process
         import psutil
-        for proc in psutil.process_iter():
+        for proc in reversed(list(psutil.process_iter())):
             if proc.name() == process_name:
                 pid = proc.pid
                 break
 
-    env = FitnessCourseEnvironment(pid=pid, eval_mode=eval_mode, device=device)
+    env = GasparEnvironment(pid=pid, eval_mode=eval_mode, device=device)
 
     # Watchdog starts RPCS3 and the game for us if it's not already running
     env.start()
@@ -134,7 +135,8 @@ def start_worker(args):
 
             # Give some run-in time before we start evaluating the model so state observations are normalized properly
             if not eval_mode:
-                redis.add(state_sequence, actions, reward, last_done, logprob, state_value, agent.policy.actor.hidden_state, agent.policy.actor.cell_state)
+                # redis.add(state_sequence, actions, reward, last_done, logprob, state_value, agent.policy.actor.hidden_state, agent.policy.actor.cell_state)
+                redis.add(state_sequence, actions, reward, last_done, logprob, state_value, None, None)
             elif eval_mode:
                 # Visualize the actions
                 Visualizer.draw_state_value_face(state_value)
@@ -157,12 +159,14 @@ def start_worker(args):
             total_steps += 1
 
             if eval_mode or steps % 5 == 0:
-                print(f"Score: %6.2f    death: %05.2f checkpoint: %d  closest_dist: %02.2f  value: %3.2f         " % (
+                print(f"Score: %6.2f    death: %05.2f checkpoint: %d  closest_dist: %02.2f  value: %3.2f  highest_z: %3.2f  from_ground: %3.2f         " % (
                     accumulated_reward,
                     time_left,
                     env.n_checkpoints,
                     env.closest_distance_to_checkpoint,
-                    state_value.item() if state_value is not None else 0.0
+                    state_value.item() if state_value is not None else 0.0,
+                    env.highest_grounded_z,
+                    env.distance_from_ground
                 ), end="\r")
 
             if done:
@@ -196,12 +200,12 @@ if __name__ == "__main__":
         parser.add_argument("--render", action="store_true", default=True)
         parser.add_argument("--force-watchdog", action="store_false")
         parser.add_argument("--eval", type=bool, action=argparse.BooleanOptionalAction, default=False)
-        parser.add_argument("--project-key", type=str, default="rac1.fitness-course")
+        parser.add_argument("--project-key", type=str, default="rac1.gaspar")
         parser.add_argument("--cpu-only", action="store_true", default=False)
 
         args = parser.parse_args()
 
-        with torch.no_grad():
+        with torch.no_grad() and torch.autograd.no_grad() and torch.inference_mode():
             start_worker(args)
     except KeyboardInterrupt:
         print("Exiting...")

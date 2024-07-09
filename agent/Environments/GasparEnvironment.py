@@ -7,49 +7,30 @@ from Game.RC1Game import RC1Game
 from .RatchetEnvironment import RatchetEnvironment
 
 
-class FitnessCourseEnvironment(RatchetEnvironment):
+class GasparEnvironment(RatchetEnvironment):
     def __init__(self, pid, eval_mode=False, device="cpu"):
         super().__init__(device=device)
 
         self.game = RC1Game(pid=pid)
 
         self.checkpoints_template = [
-            Vector3(226, 143, 49.5),
-            Vector3(213, 141, 57),
-            Vector3(198, 140, 64),
-            Vector3(198, 147, 77.5),
-            Vector3(140, 161, 50.5),
-            Vector3(114, 200, 63),
-            Vector3(142, 197, 70),
-            Vector3(130, 189, 89),
-            Vector3(117, 86, 66),
-            Vector3(136, 114, 70),
-            Vector3(201, 128, 50),
-            Vector3(269.9619445800781, 143.47598266601562, 50.0),
-            Vector3(269.9619445800781, 143.47598266601562, 50.0),
-            Vector3(298.1654052734375, 143.35801696777344, 48.0625),
-            Vector3(301.29742431640625, 178.26695251464844, 45.689918518066406),
-            Vector3(265.7449035644531, 195.6828155517578, 46.0),
-            Vector3(228.53050231933594, 203.75091552734375, 46.25),
-            Vector3(233.90478515625, 239.93067932128906, 36.0),
-            Vector3(293.2232971191406, 244.1248321533203, 34.5),
-            Vector3(320.4754943847656, 240.56504821777344, 42.0),
-            Vector3(339.72320556640625, 243.81422424316406, 60.0),
-            Vector3(329.45880126953125, 282.32977294921875, 47.75),
-            Vector3(308.2227783203125, 302.4566650390625, 75.015625),
-            Vector3(261.9341125488281, 349.85101318359375, 75.203125),
-            Vector3(247.73629760742188, 374.39923095703125, 85.03430938720703),
-            Vector3(262.2768249511719, 375.6791076660156, 87.02777099609375),
-            Vector3(280.4011535644531, 392.7554016113281, 88.98082733154297),
-            Vector3(247.2918243408203, 375.9893493652344, 85.04957580566406),
-            Vector3(264.1728515625, 345.2733154296875, 75.0),
-            Vector3(308.86572265625, 299.5409240722656, 75.015625),
-            Vector3(326.81341552734375, 279.9330749511719, 47.75),
-            Vector3(307.574951171875, 244.40528869628906, 34.0),
-            Vector3(239.2870635986328, 244.0665740966797, 36.0),
-            Vector3(228.46156311035156, 195.80406188964844, 46.0),
-            Vector3(278.11517333984375, 195.728759765625, 45.89271545410156),
-            Vector3(302.5223693847656, 146.34388732910156, 48.0625),
+            Vector3(290.9916687011719, 387.15673828125, 36.06652069091797),
+            Vector3(286.6820068359375, 344.78521728515625, 26.03125),
+            Vector3(256.2003173828125, 344.05218505859375, 26.03125),
+            Vector3(228.32533264160156, 309.6515808105469, 26.03125),
+            Vector3(234.86573791503906, 291.5450744628906, 41.25),
+            Vector3(256.46807861328125, 259.0487060546875, 43.265625),
+            Vector3(295.02911376953125, 259.6048889160156, 42.983829498291016),
+            Vector3(319.76055908203125, 279.5382385253906, 41.234375),
+            Vector3(347.9743957519531, 310.1953125, 41.015625),
+            Vector3(370.5580749511719, 306.56048583984375, 34.89314270019531),
+            Vector3(382.1036071777344, 317.7034606933594, 8.468450546264648),
+            Vector3(392.4399108886719, 355.4598388671875, 8.312515258789062),
+            Vector3(351.5343933105469, 394.4040832519531, 8.85617446899414),
+            Vector3(350.0706481933594, 423.1430358886719, 9.464095115661621),
+            Vector3(347.94891357421875, 427.8548889160156, 44.25),
+            Vector3(328.1089782714844, 408.5152587890625, 44.04953384399414),
+            Vector3(295.0697021484375, 409.2160949707031, 35.96875),
         ]
 
         self.more_checkpoints = [
@@ -92,8 +73,10 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         if self.eval_mode:
             self.game.set_should_render(True)
 
-        while self.game.get_current_level() != 3:
-            print("Waiting for Kerwan level change...")
+            self.game.set_max_nanotech(8)
+
+        while self.game.get_current_level() != 9:
+            print("Waiting for Gaspar level change...")
 
             if self.game.must_restart:
                 self.game.restart()
@@ -101,6 +84,11 @@ class FitnessCourseEnvironment(RatchetEnvironment):
             time.sleep(1)
 
         while self.game.get_death_count() <= 0:
+            self.game.set_player_position(Vector3(0, 0, -10000))
+            self.game.frame_advance(4)
+
+        death_count = self.game.get_death_count()
+        while death_count > 2 and self.game.get_death_count() <= death_count:
             self.game.set_player_position(Vector3(0, 0, -10000))
             self.game.frame_advance(4)
 
@@ -129,13 +117,13 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         # self.game.set_player_state(0)
 
         # Set player back to full health, just in case
-        self.game.set_nanotech(4)
+        self.game.set_nanotech(self.game.get_max_nanotech())
 
-        spawn_position = Vector3(259, 143, 49.5)
+        spawn_position = Vector3(290.1168212890625, 406.0809326171875, 35.96875)
 
         # 70% chance to spawn at random checkpoint, 30% in evaluation mode
-        if np.random.rand() < (0.7 if not self.eval_mode else 0):
-            checkpoint = np.random.randint(0, 2)
+        if np.random.rand() < (0.5 if not self.eval_mode else 0):
+            checkpoint = np.random.randint(0, len(self.checkpoints))
             spawn_position = self.checkpoints_template[checkpoint]
             self.checkpoint = (checkpoint + 1) % len(self.checkpoints)
 
@@ -202,6 +190,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         #   how much the agent has moved towards the goal given the input it provided.
         pre_player_position = self.game.get_player_position()
         pre_player_rotation = self.game.get_player_rotation()
+        pre_health = self.game.get_nanotech()
 
         checkpoint_position = self.checkpoints[self.checkpoint]
 
@@ -234,6 +223,10 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         speed = self.game.get_player_speed()
         player_state = self.game.get_player_state()
         distance_delta = position.distance_to_2d(pre_player_position)
+        health = self.game.get_nanotech()
+
+        if health < pre_health:
+            reward += self.reward("damaged_penalty", -1)
 
         # Give reward for looking towards the checkpoint
         # if looking_at_checkpoint:
@@ -298,7 +291,6 @@ class FitnessCourseEnvironment(RatchetEnvironment):
 
             reward += self.reward("higher_grounded_reward", r)
 
-            print(f"\nGrounded: {r}")
             self.highest_grounded_z = position.z
 
         if distance_from_checkpoint < self.closest_distance_to_checkpoint:
@@ -414,6 +406,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
             np.interp(distance_from_ground, (-64, 64), (-1, 1)),  # 17
             np.interp(speed, (0, 2), (-1, 1)),  # 18
             np.interp(player_state, (0, 255), (-1, 1)),  # 19
+            np.interp(health, (0, 10), (-1, 1)),  # 20
 
             np.interp(self.timer, (0, 1000 * 1000), (-1, 1)),  # 20
 
@@ -427,7 +420,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
             np.interp(action, (0, 0xFFFFFFFF), (-1, 1)),  # 25
 
             # Collision data
-            *self.game.get_collisions()  # 64 collisions + 64 classes + 64*3 normals
+            *self.game.get_collisions_with_normals()  # 64 collisions + 64 classes + 64*3 normals
         ]
 
         # state = [
@@ -492,8 +485,18 @@ class FitnessCourseEnvironment(RatchetEnvironment):
 # Just used for various tests of the environment
 if __name__ == '__main__':
     try:
-        env = FitnessCourseEnvironment(process_name="rpcs3.exe", eval_mode=False, device="cpu")
+        # Find the rpcs3 process
+        import psutil
+
+        for proc in reversed(list(psutil.process_iter())):
+            if proc.name() == "rpcs3":
+                pid = proc.pid
+                break
+
+        env = GasparEnvironment(pid=pid, eval_mode=False, device="cpu")
         env.start()
+
+        env.game.set_should_render(True)
 
         while True:
             steps = 0
@@ -508,7 +511,29 @@ if __name__ == '__main__':
             while True:
                 # current_time = time.time()
 
+                pre_nanotech = env.game.get_nanotech()
+
                 _, reward, terminal = env.step([0, 0, 0, 0, 0, 0, 0])
+
+                total_reward += reward
+
+                print(f"Score: %6.2f checkpoint: %d  closest_dist: %02.2f  highest_z: %3.2f  from_ground: %3.2f" % (
+                    total_reward,
+                    env.n_checkpoints,
+                    env.closest_distance_to_checkpoint,
+                    env.highest_grounded_z,
+                    env.distance_from_ground
+                ), end="\r")
+
+                post_nanotech = env.game.get_nanotech()
+
+                # if pre_nanotech != post_nanotech:
+                #     print(f"New nanotech: {post_nanotech}")
+
+                if terminal:
+                    print("")
+                    break
+
                 # env.game.frame_advance()
 
                 # total_reward += reward
@@ -518,7 +543,10 @@ if __name__ == '__main__':
                 #     break
 
                 # current_position = env.game.get_player_position()
-                # print(f"\r[{current_position.x}, {current_position.y}, {current_position.z}, {env.game.get_player_rotation().z}],", end="")
+                # print(f"\rVector3({current_position.x}, {current_position.y}, {current_position.z}),", end="")
+                #
+                # input()
+
                 #
                 # # Schedule next frame
                 # next_frame_time += 1 / 60  # Schedule for the next 1/60th second

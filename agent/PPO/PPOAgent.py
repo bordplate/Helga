@@ -97,18 +97,19 @@ class PPOAgent:
                         batch_slice = [item[slice:slice + self.mini_batch_size] for item in batch]
 
                         (states, actions, _rewards, dones, old_logprobs,
-                         cell_states, hidden_states, advantages, returns) = zip(batch_slice)
+                         # cell_states, hidden_states, advantages, returns) = zip(batch_slice)
+                         advantages, returns) = zip(batch_slice)
 
                         states = states[0].clone().to(self.device)
                         actions = actions[0].clone().to(self.device)
                         old_logprobs = old_logprobs[0].clone().to(self.device)
                         advantages = advantages[0].clone().to(self.device)
                         returns = returns[0].clone().to(self.device)
-                        hidden_states = hidden_states[0].clone().permute(1, 0, 2).to(self.device)
-                        cell_states = cell_states[0].clone().permute(1, 0, 2).to(self.device)
+                        # hidden_states = hidden_states[0].clone().permute(1, 0, 2).to(self.device)
+                        # cell_states = cell_states[0].clone().permute(1, 0, 2).to(self.device)
 
                         # Evaluating old actions and values
-                        logprobs, state_values, dist_entropy = self.policy.evaluate(states, actions, self.action_mask, hidden_states.detach(), cell_states.detach())
+                        logprobs, state_values, dist_entropy = self.policy.evaluate(states, actions, self.action_mask, None, None)
                         # source_y_t = self.random_encoder(states[:, -1, :].squeeze())
 
                         # intrinsic_rewards = self.random_encoder.compute_intrinsic_rewards(source_y_t[:, :, 0, 0], y_t.squeeze(), True)
