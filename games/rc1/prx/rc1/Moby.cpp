@@ -86,3 +86,12 @@ Moby* Moby::find_last(unsigned short o_class) {
 
     return last;
 }
+
+void Moby::delete_all(unsigned short o_class) {
+    for (Moby *moby = moby_ptr; moby <= moby_ptr_end; moby++) {
+        if (moby->state < 0x7f && moby->oClass == o_class) {
+            //moby->state = 0x7f;
+            delete_moby(moby);
+        }
+    }
+}

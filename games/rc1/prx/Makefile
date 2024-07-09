@@ -37,7 +37,7 @@ PPU_PRX_LDFLAGS  += \
 	-Wl,--end-group
 
 CCFLAGS = $(SHK_PRX_DEFSYMS) $(SHK_PRX_DEFINES) rc1/globals.ld $(SFILES) $(CPPFILES) $(CFILES) $(DEFINES) -I$(PS3_SDK)/target/ppu/include -I./ -fno-exceptions -fno-rtti -Wa,-mregnames $(PPU_PRX_LDFLAGS)
-SCETOOL = $(WINE) $(PS3_SDK)/Tools/alt/scetool.exe
+SCETOOL = $(PS3_SDK)/Tools/alt/scetool.exe
 
 elf:
 	$(CC) $(CCFLAGS) -nostartfiles -Wl,-relocatable -o $(BIN_DIR)/mod.elf

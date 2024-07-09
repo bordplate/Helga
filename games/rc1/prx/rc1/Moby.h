@@ -184,6 +184,8 @@ struct Moby {
 
     static Moby* find_first(unsigned short o_class);
     static Moby* find_last(unsigned short o_class);
+
+    static void delete_all(unsigned short o_class);
 #endif
 }
 #ifdef __cplusplus

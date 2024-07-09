@@ -153,9 +153,9 @@ void Game::on_tick() {
     // Player is most likely on intro menu scene. Present and handle multiplayer startup stuff.
     if (current_planet == 0 && frame_count > 10) {
         seen_planets[0] = 1;
-        seen_planets[5] = 1;
+        seen_planets[9] = 1;
         *(int*)0xa10700 = 1;
-        *(int*)0xa10704 = (int)3;
+        *(int*)0xa10704 = (int)9;
         //*(int*)0x969c70 = (int)5;
     }
 
@@ -180,6 +180,17 @@ void Game::on_tick() {
 //            skid_address = (uint32_t)Moby::find_first(717);
 //        }
 //    }
+
+	if (current_planet == 9 && frame_count < 2) {
+        Moby::delete_all(1201);
+        Moby::delete_all(1285);
+
+        // Enemies
+        Moby::delete_all(193);
+        Moby::delete_all(1885);
+        Moby::delete_all(1023);
+        Moby::delete_all(52);
+	}
 
     if (!current_view) {
         RemoteView* view = new RemoteView();
@@ -286,13 +297,13 @@ void Game::on_tick() {
         forward.x = camera_forward.z;
         forward.y = camera_right.z;
         forward.z = camera_up.z;
-        forward.w = 0;
+        forward.w = 1;
 
         Vec4 left = Vec4();
         left.x = camera_forward.x;
         left.y = camera_right.x;
         left.z = camera_up.x;
-        left.w = 0;
+        left.w = 1;
 
         Vec4 up = camera_up;
         up.x = camera_forward.y;
@@ -312,30 +323,30 @@ void Game::on_tick() {
                 ray.x = camera_pos.x + ray_distance * forward.x + (ray_wide * (j - cols/2) / cols) * left.x + (ray_wide * (i - rows/2) / rows) * up.x;
                 ray.y = camera_pos.y + ray_distance * forward.y + (ray_wide * (j - cols/2) / cols) * left.y + (ray_wide * (i - rows/2) / rows) * up.y;
                 ray.z = camera_pos.z + ray_distance * forward.z + (ray_wide * (j - cols/2) / cols) * left.z + (ray_wide * (i - rows/2) / rows) * up.z;
-                ray.w = 1;
+                ray.w = camera_pos.w;
 
                 // To avoid colliding with the camera itself, we start the ray a bit ahead of the camera
                 Vec4 ray_start = camera_pos;
-                ray_start.x += 0.5f * forward.x;
-                ray_start.y += 0.5f * forward.y;
-                ray_start.z += 0.5f * forward.z;
+                ray_start.x += 1.0f * up.x;
+                ray_start.y += 1.0f * up.y;
+                ray_start.z += 1.0f * up.z;
 
                 // Apply oscillation
                 ray.x += oscillation_offset_x * left.x + oscillation_offset_y * up.x;
                 ray.y += oscillation_offset_x * left.y + oscillation_offset_y * up.y;
                 ray.z += oscillation_offset_x * left.z + oscillation_offset_y * up.z;
 
-                int coll = coll_line(&ray_start, &ray, 0x24, nullptr, nullptr);
+                int coll = coll_line(&ray_start, &ray, 0, nullptr, nullptr);
 
                 Moby* test_moby = nullptr;
 
-                if (should_render) {
-                    test_moby = (Moby *)collisions_mobys[i * cols + j];
-                }
+                //if (should_render) {
+                //    test_moby = (Moby *)collisions_mobys[i * cols + j];
+                //}
 
                 if (coll) {
                     collisions_distance[i * cols + j] = distance(camera_pos, coll_output.ip);
-                    collisions_class[i * cols + j] = -1;
+                    collisions_class[i * cols + j] = -2 - (coll_output.poly & 0x1fU);
                     collisions_normals_x[i * cols + j] = coll_output.normal.x;
                     collisions_normals_y[i * cols + j] = coll_output.normal.y;
                     collisions_normals_z[i * cols + j] = coll_output.normal.z;
@@ -344,34 +355,34 @@ void Game::on_tick() {
                         collisions_class[i * cols + j] = coll_output.pMoby->oClass;
                     }
 
-                    if (should_render) {
-                        // Update or create moby to show where the raycast hit
-                        if (test_moby == nullptr || test_moby->state >= 0x7f) {
-                            test_moby = Moby::spawn(74, 0, 0);
-                            test_moby->pUpdate = nullptr;
-                            test_moby->collision = nullptr;
-                            test_moby->scale = 0.01f;
-                            test_moby->alpha = 64;
-
-                            collisions_mobys[i * cols + j] = test_moby;
-
-                            Logger::debug("Spawning new moby at %f, %f, %f", coll_output.ip.x, coll_output.ip.y,
-                                          coll_output.ip.z);
-                        }
-
-                        test_moby->position.x = coll_output.ip.x;
-                        test_moby->position.y = coll_output.ip.y;
-                        test_moby->position.z = coll_output.ip.z;
-                    }
+                    //if (should_render) {
+                    //    // Update or create moby to show where the raycast hit
+                    //    if (test_moby == nullptr || test_moby->state >= 0x7f) {
+                    //        test_moby = Moby::spawn(74, 0, 0);
+                    //        test_moby->pUpdate = nullptr;
+                    //        test_moby->collision = nullptr;
+                    //        test_moby->scale = 0.01f;
+                    //        test_moby->alpha = 64;
+//
+                    //        collisions_mobys[i * cols + j] = test_moby;
+//
+                    //        Logger::debug("Spawning new moby at %f, %f, %f", coll_output.ip.x, coll_output.ip.y,
+                    //                      coll_output.ip.z);
+                    //    }
+//
+                    //    test_moby->position.x = coll_output.ip.x;
+                    //    test_moby->position.y = coll_output.ip.y;
+                    //    test_moby->position.z = coll_output.ip.z;
+                    //}
 //
 //                    Logger::debug("Collided with moby at %f, %f, %f", coll_output.ip.x, coll_output.ip.y, coll_output.ip.z);
                 } else {
                     collisions_distance[i * cols + j] = -32.0f;
-                    collisions_class[i * cols + j] = -2;
+                    collisions_class[i * cols + j] = -128;
 
-                    if (should_render && test_moby != nullptr) {
-                        test_moby->position.z = -100;
-                    }
+                    //if (should_render && test_moby != nullptr) {
+                    //    test_moby->position.z = -100;
+                    //}
                 }
             }
         }
@@ -544,6 +555,8 @@ void Game::on_tick() {
 void Game::before_player_spawn() {
     death_count += 1;
     checkpoint_moby = nullptr;
+
+    camera_moby = Moby::find_first(0x3ef);
 
     if (should_render) {
         // Clear collision_mobys
