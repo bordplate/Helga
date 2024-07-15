@@ -7,31 +7,27 @@ from threading import Lock
 
 
 class RolloutBuffer:
-    def __init__(self, owner, capacity, buffer_size=512, gamma=0.99, lambda_gae=1, device='cpu', cell_size=256):
-        self.owner = owner
-        self.capacity = capacity
-        self.buffer = [None] * capacity
-        self.position = 0
-        self.total = 0
-        self.last_episode_start = 0
-        self.lock = Lock()
-        self.new_samples = 0
+    def __init__(self, buffer_size, batch_size=512, gamma=0.99, lambda_gae=1, device='cpu', cell_size=256):
+        self.buffer_size = buffer_size
+        self.batch_size = batch_size
+
         self.gamma = gamma
         self.lambda_gae = lambda_gae
-        self.cached = [None] * self.capacity
+        self.cached = [None] * self.buffer_size
 
-        self.buffer_size = buffer_size
+        self.buffer = []
+        self.worker_buffers = {}  # type: dict[str, list]
+        self.total = 0
+        self.lock = Lock()
 
         self.ready = False
 
-        self.discounted_reward = 0
-
-        #self.hidden_state = torch.zeros((cell_size), dtype=torch.bfloat16, device='cpu')
-        #self.cell_state = torch.zeros((cell_size), dtype=torch.bfloat16, device='cpu')
+        # self.hidden_state = torch.zeros((cell_size), dtype=torch.bfloat16, device='cpu')
+        # self.cell_state = torch.zeros((cell_size), dtype=torch.bfloat16, device='cpu')
 
         self.device = device
 
-    def compute_returns_and_advantages(self, last_value, done):
+    def compute_returns_and_advantages(self, buffer, last_value, done):
         last_gae_lam = 0
         # Set the value of the next state to zero if the episode ends
         # next_value = 0 if done else last_value
@@ -39,34 +35,57 @@ class RolloutBuffer:
         mask = 1.0 - float(done)  # Convert `done` to float and invert
 
         # Reverse iteration over your buffer to calculate advantages and returns
-        for step in reversed(range(self.last_episode_start, self.total)):
-            if step < self.total - 1:
-                mask = 1.0 - self.buffer[step + 1][3].float()
+        for step in reversed(range(0, len(buffer))):
+            if step < len(buffer) - 1:
+                mask = 1.0 - buffer[step + 1][3].float()
 
             next_value = next_value * mask
             last_gae_lam = last_gae_lam * mask
 
             # Calculate the delta according to the Bellman equation
-            delta = self.buffer[step][2] + self.gamma * next_value - self.buffer[step][5]
+            delta = buffer[step][2] + self.gamma * next_value - buffer[step][5]
             # Update last_gae_lam using the delta and decay terms
             last_gae_lam = delta + self.gamma * self.lambda_gae * last_gae_lam
             # The return is the value of the state plus the estimated advantage
-            _return = last_gae_lam + self.buffer[step][5]
+            _return = last_gae_lam + buffer[step][5]
 
             # Replace the original transition with the new one that includes advantage and return
-            self.buffer[step] = self.buffer[step] + (last_gae_lam, _return)
+            buffer[step] = buffer[step] + (last_gae_lam, _return)
 
-            next_value = self.buffer[step][5]
+            next_value = buffer[step][5]
 
-        self.last_episode_start = self.total
+        return buffer
 
-    def add(self, state, actions, reward, done, logprob, state_value, hidden_state, cell_state):
-        if self.ready:
-            return
+    def add(self, worker: str, state, actions, reward, done, logprob, state_value, hidden_state, cell_state):
+        if worker not in self.worker_buffers:
+            self.worker_buffers[worker] = []
 
-        if self.total >= self.buffer_size:
-            self.compute_returns_and_advantages(state_value.to('cpu'), done)
-            self.ready = True
+        buffer = self.worker_buffers[worker]
+
+        if (len(buffer) >= self.batch_size or done) and not self.ready:
+            self.compute_returns_and_advantages(buffer, state_value.to('cpu'), done)
+
+            # Add the buffer to the main buffer
+            self.lock.acquire()
+
+            for i in range(len(buffer)):
+                self.buffer += [buffer[i]]
+                self.total += 1
+
+                # Buffer is now full and ready to be processed. Instead of adding the rest of the observations, we now
+                #  shift the worker buffer so that the overflowing observations are at the start of the buffer and then
+                #  we keep collecting new samples from the agent while the current ones are being sampled.
+                if self.total >= self.buffer_size:
+                    self.ready = True
+
+                    self.worker_buffers[worker] = buffer[i:]
+
+                    break
+                else:
+                    self.worker_buffers[worker] = []
+
+            self.lock.release()
+
             return
 
         state = state.to('cpu')
@@ -76,27 +95,21 @@ class RolloutBuffer:
         logprob = logprob.to('cpu')
         state_value = state_value.to('cpu')
 
-        self.lock.acquire()
+        buffer += [(state, actions, reward, done, logprob, state_value, None, None)]
 
-        self.buffer[self.position] = (state, actions, reward, done, logprob, state_value, None, None)
-        # self.buffer[self.position] = (state, actions, reward, done, logprob, state_value, hidden_state.to('cpu').unsqueeze(dim=0), cell_state.to('cpu').unsqueeze(dim=0))
+        if len(buffer) >= self.batch_size:
+            self.worker_buffers[worker] = buffer[-self.batch_size:]
 
-        self.position = (self.position + 1) % self.capacity
-        self.lock.release()
-
-        self.new_samples += 1
-
-        self.total += 1
+        # buffer[self.position] = (state, actions, reward, done, logprob, state_value, hidden_state.to('cpu').unsqueeze(dim=0), cell_state.to('cpu').unsqueeze(dim=0))
 
     def clear(self):
         self.lock.acquire()
 
-        self.buffer = [None] * self.capacity
-        self.position = 0
-        self.last_episode_start = 0
-        self.total = 0
+        self.buffer = self.buffer[self.batch_size:]
+
+        self.total = len(self.buffer)
         self.ready = False
-        self.cached = [None] * self.capacity
+        self.cached = [None] * self.buffer_size
 
         self.lock.release()
 

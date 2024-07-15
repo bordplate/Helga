@@ -3,20 +3,45 @@ from pygame.locals import *
 from OpenGL.GL import *
 from OpenGL.GLU import *
 import numpy as np
+import psutil
 
 from Game.RC1Game import RC1Game
 
+def draw_axes():
+    glBegin(GL_LINES)
+
+    # X axis in red
+    glColor3f(1.0, 0.0, 0.0)
+    glVertex3f(0.0, 0.0, 0.0)
+    glVertex3f(2.0, 0.0, 0.0)
+
+    # Y axis in green
+    glColor3f(0.0, 1.0, 0.0)
+    glVertex3f(0.0, 0.0, 0.0)
+    glVertex3f(0.0, 2.0, 0.0)
+
+    # Z axis in blue
+    glColor3f(0.0, 0.0, 1.0)
+    glVertex3f(0.0, 0.0, 0.0)
+    glVertex3f(0.0, 0.0, 2.0)
+
+    glEnd()
+
 def draw_points(points, normals):
     glBegin(GL_POINTS)
-    for point in points:
+    for i, point in enumerate(points):
+        color = (i / len(points), 1.0 - i / len(points), 0.5)
+        glColor3f(*color)
         glVertex3fv(point)
     glEnd()
 
-    # Draw planes pointing in the normal direction
-    for point, normal in zip(points, normals):
-        draw_plane(point, normal)
+    # Draw planes oriented according to normals
+    for i, (point, normal) in enumerate(zip(points, normals)):
+        color = (i / len(points), 1.0 - i / len(points), 0.5)
+        draw_plane(point, normal, color)
 
-def draw_plane(center, normal, size=0.5):
+def draw_plane(center, normal, color, size=0.5):
+    normal = normal / np.linalg.norm(normal)  # Normalize the normal vector
     if np.allclose(normal, [0, 0, 1]) or np.allclose(normal, [0, 0, -1]):
         u = np.cross(normal, [0, 1, 0])
     else:
@@ -32,7 +57,7 @@ def draw_plane(center, normal, size=0.5):
     p4 = center + u - v
 
     glBegin(GL_QUADS)
-    glNormal3fv(normal)  # Set the normal for lighting
+    glColor3f(*color)
     glVertex3fv(p1)
     glVertex3fv(p2)
     glVertex3fv(p3)
@@ -44,7 +69,7 @@ def main():
     display = (800, 600)
     pygame.display.set_mode(display, DOUBLEBUF | OPENGL)
     gluPerspective(45, (display[0] / display[1]), 0.1, 50.0)
-    # glTranslatef(0.0, 0.0, -10)  # Move the camera back to view from the origin
+    glTranslatef(0.0, 0.0, -20)  # Move the camera back to view from the origin
 
     # Set up lighting
     glEnable(GL_LIGHTING)
@@ -56,8 +81,17 @@ def main():
     glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
     glEnable(GL_DEPTH_TEST)
 
-    game = RC1Game()
+    pid = 0
+
+    # Find the rpcs3 process
+    for proc in reversed(list(psutil.process_iter())):
+        if proc.name() == "rpcs3":
+            pid = proc.pid
+            break
+
+    game = RC1Game(pid=pid)
     game.open_process()
+    game.set_should_render(True)
 
     clock = pygame.time.Clock()
     while True:
@@ -66,77 +100,34 @@ def main():
                 pygame.quit()
                 return
 
-        collisions = np.array(game.get_collisions_with_normals())
-        distances = collisions[:64].reshape(8, 8)
+        distances, classes, normals_x, normals_y, normals_z = game.get_collisions_with_normals()
+        distances = np.array(distances).reshape(8, 8)
 
         # Calculate points based on distances in the collisions
-        # We know which direction we should place the point by getting the grid position of the collision
         points = []
 
         for i in range(8):
             for j in range(8):
-                distance = distances[i, j]
-
-                # Calculate position where maximum distance is 64.0. The raycasts are calculated like this:
-                # Vec4 forward = camera_forward;
-                # forward.x = camera_forward.z;
-                # forward.y = camera_right.z;
-                # forward.z = camera_up.z;
-                # forward.w = 0;
-                #
-                # Vec4 left = Vec4();
-                # left.x = camera_forward.x;
-                # left.y = camera_right.x;
-                # left.z = camera_up.x;
-                # left.w = 0;
-                #
-                # Vec4 up = camera_up;
-                # up.x = camera_forward.y;
-                # up.y = camera_right.y;
-                # up.z = camera_up.y;
-                #
-                # float ray_distance = 64.0f;
-                # float ray_wide = 90.0f;
-                #
-                # float fov = 64.0f;
-                # int rows = 8;
-                # int cols = 8;
-                #
-                # for (int i = 0; i < rows; i++) {
-                #   for (int j = 0; j < cols; j++) {
-                #   Vec4 ray = Vec4();
-                #   ray.x = camera_pos.x + ray_distance * forward.x + (ray_wide * (j - cols/ 2) /cols) * left.x + (ray_wide * (i - rows/ 2) /rows) * up.x;
-                #   ray.y = camera_pos.y + ray_distance * forward.y + (ray_wide * (j - cols/ 2) /cols) * left.y + (ray_wide * (i - rows/ 2) /rows) * up.y;
-                #   ray.z = camera_pos.z + ray_distance * forward.z + (ray_wide * (j - cols/ 2) /cols) * left.z + (ray_wide * (i - rows/ 2) /rows) * up.z;
-                #   ray.w = 1;
-                #   Vec4 ray_start = camera_pos;
-                #   ray_start.x += 0.5f * forward.x;
-                #   ray_start.y += 0.5f * forward.y;
-                #   ray_start.z += 0.5f * forward.z;
-                #
-                #   // Apply oscillation
-                #   ray.x += oscillation_offset_x * left.x + oscillation_offset_y * up.x;
-                #   ray.y += oscillation_offset_x * left.y + oscillation_offset_y * up.y;
-                #   ray.z += oscillation_offset_x * left.z + oscillation_offset_y * up.z;
-                #
-                #   int coll = coll_line(&ray_start, &ray, 0x24, nullptr, nullptr);
-
-                # Calculate the position of the point based on the distance and the angles
-                theta = np.radians(90 - 90 * i / 8)  # Polar angle
-                phi = np.radians(90 * j / 8)  # Azimuthal angle
-
-                x = distance * np.sin(theta) * np.cos(phi)
-                y = distance * np.sin(theta) * np.sin(phi)
-                z = distance * np.cos(theta)
-
+                x = (i - 4) * 2  # Adjust the grid position
+                y = (j - 4) * 2  # Adjust the grid position
+                z = distances[i, j]
                 points.append([x, y, z])
 
         points = np.array(points)
 
         # Get the normals from the last 64*3 values in collisions
-        normals = collisions[64:].reshape(64, 3)
+        normals = np.array([*normals_x, *normals_y, *normals_z]).reshape(64, 3)
+
+        # Ensure normals are correctly normalized
+        for idx, normal in enumerate(normals):
+            if np.linalg.norm(normal) > 0:
+                normals[idx] = normal / np.linalg.norm(normal)
+
+        print("Points:", points)
+        print("Normals:", normals)
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        draw_axes()  # Draw coordinate axes for reference
         draw_points(points, normals)
         pygame.display.flip()
         clock.tick(60)

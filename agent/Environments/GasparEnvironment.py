@@ -1,6 +1,7 @@
 import time
 import numpy as np
 import torch
+import random
 
 from Game.Game import Game, Vector3
 from Game.RC1Game import RC1Game
@@ -117,11 +118,14 @@ class GasparEnvironment(RatchetEnvironment):
         # self.game.set_player_state(0)
 
         # Set player back to full health, just in case
-        self.game.set_nanotech(self.game.get_max_nanotech())
+        if self.eval_mode:
+            self.game.set_nanotech(self.game.get_max_nanotech())
+        else:
+            self.game.set_nanotech(1)
 
         spawn_position = Vector3(290.1168212890625, 406.0809326171875, 35.96875)
 
-        # 70% chance to spawn at random checkpoint, 30% in evaluation mode
+        # chance to spawn at random checkpoint, different config for evaluation mode
         if np.random.rand() < (0.5 if not self.eval_mode else 0):
             checkpoint = np.random.randint(0, len(self.checkpoints))
             spawn_position = self.checkpoints_template[checkpoint]
@@ -213,7 +217,7 @@ class GasparEnvironment(RatchetEnvironment):
 
         if death_count != self.game.get_death_count():
             terminal = True
-            reward += self.reward("death_penalty", -1.5)
+            reward += self.reward("death_penalty", -5.0)
 
         # Get updated player info
         looking_at_checkpoint = self.game.get_camera_position().is_looking_at(self.game.get_camera_rotation(), checkpoint_position)
@@ -298,8 +302,8 @@ class GasparEnvironment(RatchetEnvironment):
 
         self.time_since_last_checkpoint += 1
 
-        # If agent is within 4 units of checkpoint, go to next checkpoint or loop around
-        if distance_from_checkpoint < 4:
+        # If agent is within 5 units of checkpoint, go to next checkpoint or loop around
+        if distance_from_checkpoint < 5:
             self.time_since_last_checkpoint = 0
 
             self.checkpoint += 1
@@ -327,7 +331,7 @@ class GasparEnvironment(RatchetEnvironment):
         # Check that the agent hasn't stopped progressing
         if self.time_since_last_checkpoint > 30 * 30:  # 30 in-game seconds
             terminal = True
-            reward += self.reward("timeout_penalty", -1.0)
+            reward += self.reward("timeout_penalty", -10.0)
 
         # Discourage standing still
         # if distance_delta <= 0.01 and self.timer > 30 * 5:
@@ -386,14 +390,16 @@ class GasparEnvironment(RatchetEnvironment):
             np.interp(camera_pos.x, (0, 500), (-1, 1)),  # 4
             np.interp(camera_pos.y, (0, 500), (-1, 1)),  # 5
             np.interp(camera_pos.z, (-150, 150), (-1, 1)),  # 6
+            np.interp(camera_rot.x, (-4, 4), (-1, 1)),  # 7
+            np.interp(camera_rot.y, (-4, 4), (-1, 1)),  # 7
             np.interp(camera_rot.z, (-4, 4), (-1, 1)),  # 7
 
             np.interp(camera_to_checkpoint_angle, (-4, 4), (-1, 1)),  # 8
 
             # Checkpoints
-            np.interp(checkpoint_position.x, (0, 500), (-1, 1)),  # 8
-            np.interp(checkpoint_position.y, (0, 500), (-1, 1)),  # 9
-            np.interp(checkpoint_position.z, (-150, 150), (-1, 1)),  # 10
+            0,  # np.interp(checkpoint_position.x, (0, 500), (-1, 1)),  # 8
+            # 0,  # np.interp(checkpoint_position.y, (0, 500), (-1, 1)),  # 9
+            # 0,  # np.interp(checkpoint_position.z, (-150, 150), (-1, 1)),  # 10
             check_diff_x,  # 11
             check_diff_y,  # 12
             check_diff_z,  # 13

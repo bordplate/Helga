@@ -27,11 +27,11 @@ class RC1Game(Game):
     max_nanotech_address = 0x71fb28
     items_address = 0x96C140
 
-    collisions_address = 0xB00100
-    collisions_class_address = 0xB00200
-    collisions_normals_x = 0xB00600
-    collisions_normals_y = 0xB00700
-    collisions_normals_z = 0xB00A00
+    collisions_address = 0xB00600 + ((256*4) * 0)
+    collisions_class_address = 0xB00600 + ((256*4) * 1)
+    collisions_normals_x = 0xB00600 + ((256*4) * 2)
+    collisions_normals_y = 0xB00600 + ((256*4) * 3)
+    collisions_normals_z = 0xB00600 + ((256*4) * 4)
 
     oscillation_offset_x_address = 0xB00060
     oscillation_offset_y_address = 0xB00064
@@ -300,21 +300,19 @@ class RC1Game(Game):
         classes = []
 
         # Fetch all the memory we need in one go
-        collision_memory = self.process.read_memory(self.collisions_address, 0x200)
-        # class_memory = self.process.read_memory(self.collisions_class_address, 64 * 4)
 
         # 8 rows, 8 columns
-        for i in range(8):
-            for j in range(8):
-                offset = 4 * (i * 8 + j)
+        for i in range(16):
+            for j in range(16):
+                offset = 4 * (i * 16 + j)
 
-                # collision_address = self.collisions_address + offset
-                # collision_value = self.process.read_float(collision_address)
-                collision_value = Process.read_float_from_buffer(collision_memory, offset)
+                collision_address = self.collisions_address + offset
+                collision_value = self.process.read_float(collision_address)
+                # collision_value = Process.read_float_from_buffer(collision_memory, offset)
 
-                # class_address = self.collisions_class_address + offset
-                # class_value = self.process.read_int(class_address)
-                class_value = Process.read_int_from_buffer(collision_memory, 0x100 + offset, signed=True)
+                class_address = self.collisions_class_address + offset
+                class_value = self.process.read_int(class_address, signed=True)
+                # class_value = Process.read_int_from_buffer(collision_memory, 0x100 + offset, signed=True)
 
                 if normalized:
                     collision_value = np.interp(collision_value, [-32, 64], [-1, 1])
@@ -355,52 +353,44 @@ class RC1Game(Game):
         # Flatten and return self.collisions_render and self.mobys_render
         return [*self.collisions_render.copy().flatten(), *self.mobys_render.copy().flatten()]
 
-    def get_collisions_with_normals(self, normalized=True):
+    def get_collisions_with_normals(self, normalized=True) -> list:
         collisions = []
         normals_x = []
         normals_y = []
         normals_z = []
         classes = []
 
-        # 8 rows, 8 columns
-        for i in range(8):
-            for j in range(8):
-                offset = 4 * (i * 8 + j)
+        memory = self.process.read_memory(self.collisions_address, ((256*4) * 5))
+
+        # 16 rows, 16 columns
+        for i in range(16):
+            for j in range(16):
+                offset = 4 * (i * 16 + j)
 
                 collision_address = self.collisions_address + offset
-                collision_value = self.process.read_float(collision_address)
-
-                normal_x_address = self.collisions_normals_x + offset
-                normal_x = self.process.read_float(normal_x_address)
-
-                normal_y_address = self.collisions_normals_y + offset
-                normal_y = self.process.read_float(normal_y_address)
-
-                normal_z_address = self.collisions_normals_z + offset
-                normal_z = self.process.read_float(normal_z_address)
+                collision_value = self.process.read_float_from_buffer(memory, 0x400 * 0 + offset)
 
                 class_address = self.collisions_class_address + offset
-                class_value = self.process.read_int(class_address, signed=True)
+                class_value = self.process.read_int_from_buffer(memory, 0x400 * 1 + offset, signed=True)
 
-                # DEBUG: Need to figure out maximum and minimum values for normals
-                # if not hasattr(self, 'max_normal_x'):
-                #     self.max_normal_x = normal_x
-                #     self.min_normal_x = normal_x
-                #
-                # if normal_x > self.max_normal_x:
-                #     self.max_normal_x = normal_x
-                #     print(f"New max normal x: {self.max_normal_x}")
-                #     print(f"Min: {self.min_normal_x}, Max: {self.max_normal_x}")
-                #
-                # if normal_x < self.min_normal_x:
-                #     self.min_normal_x = normal_x
-                #     print(f"New min normal x: {self.min_normal_x}")
-                #     print(f"Min: {self.min_normal_x}, Max: {self.max_normal_x}")
+                normal_x_address = self.collisions_normals_x + offset
+                normal_x = np.float64(self.process.read_float_from_buffer(memory, 0x400 * 2 + offset) / (1024 * 1024))
 
-                # Min: -217395200.0, Max: 153303040.0
+                normal_y_address = self.collisions_normals_y + offset
+                normal_y = np.float64(self.process.read_float_from_buffer(memory, 0x400 * 3 + offset) / (1024 * 1024))
 
-                max = 471982336.0
-                min = -471982336.0
+                normal_z_address = self.collisions_normals_z + offset
+                normal_z = np.float64(self.process.read_float_from_buffer(memory, 0x400 * 4 + offset) / (1024 * 1024))
+
+                # Normalize the normal vector
+                magnitude = np.sqrt(normal_x ** 2 + normal_y ** 2 + normal_z ** 2)
+                if magnitude != 0:
+                    normal_x /= magnitude
+                    normal_y /= magnitude
+                    normal_z /= magnitude
+
+                max = 1.0
+                min = -1.0
 
                 assert min <= normal_x <= max, f"Normal x: {normal_x}"
                 assert min <= normal_y <= max, f"Normal y: {normal_y}"
@@ -408,9 +398,6 @@ class RC1Game(Game):
 
                 if normalized:
                     collision_value = np.interp(collision_value, [-32, 64], [-1, 1])
-                    normal_x = np.interp(normal_x, [min, max], [-1, 1])
-                    normal_y = np.interp(normal_y, [min, max], [-1, 1])
-                    normal_z = np.interp(normal_z, [min, max], [-1, 1])
                     class_value = np.interp(class_value, [-128, 4096], [-1, 1])
 
                 collisions.append(collision_value)

@@ -32,8 +32,19 @@ def render_plane(normal, distance, size=1.0):
 
 def main():
     init_pygame()
-    rc1_game = RC1Game()
+
+    pid = 0
+
+    # Find the rpcs3 process
+    import psutil
+    for proc in reversed(list(psutil.process_iter())):
+        if proc.name() == "rpcs3":
+            pid = proc.pid
+            break
+
+    rc1_game = RC1Game(pid=pid)
     rc1_game.open_process()
+    rc1_game.set_should_render(True)
 
     while True:
         for event in pygame.event.get():
@@ -44,7 +55,7 @@ def main():
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
         # Get collision data
-        collisions, normals_x, normals_y, normals_z, classes = rc1_game.get_collisions_with_normals()
+        collisions, classes, normals_x, normals_y, normals_z = rc1_game.get_collisions_with_normals()
 
         # Debug: Print the first few collisions and normals
         print("Collisions:", collisions[:5])

@@ -45,10 +45,10 @@ class RedisHub:
         self.redis.publish(self.key, data)
 
     def get_latest_model(self):
-        model_timestamp = self.redis.get("rac1.gaspar.model_timestamp")
+        model_timestamp = self.redis.get("rac1.fitness-course.model_timestamp")
         if model_timestamp is not None and float(model_timestamp) > self.latest_model:
             # Load the latest model from Redis
-            model_pickled = self.redis.get("rac1.gaspar.model")
+            model_pickled = self.redis.get("rac1.fitness-course.model")
             if model_pickled is not None:
                 self.model = pickle.loads(model_pickled)
                 self.latest_model = float(model_timestamp)
@@ -56,14 +56,14 @@ class RedisHub:
         return self.model
 
     def get_model(self):
-        model_pickle = self.redis.get("rac1.gaspar.model")
+        model_pickle = self.redis.get("rac1.fitness-course.model")
         if model_pickle is not None:
             return pickle.loads(model_pickle)
 
         return None
 
     def get_optimizer(self):
-        optimizer_pickle = self.redis.get("rac1.gaspar.optimizer")
+        optimizer_pickle = self.redis.get("rac1.fitness-course.optimizer")
         if optimizer_pickle is not None:
             return pickle.loads(optimizer_pickle)
 
@@ -73,10 +73,10 @@ class RedisHub:
         """
         Gets the latest model if we don't already have it, otherwise None
         """
-        model_timestamp = self.redis.get("rac1.gaspar.model_timestamp")
+        model_timestamp = self.redis.get("rac1.fitness-course.model_timestamp")
         if model_timestamp is not None and float(model_timestamp) > self.latest_model:
             # Load the latest model from Redis
-            model_pickled = self.redis.get("rac1.gaspar.model")
+            model_pickled = self.redis.get("rac1.fitness-course.model")
             if model_pickled is not None:
                 self.model = pickle.loads(model_pickled)
                 self.latest_model = float(model_timestamp)
@@ -91,9 +91,9 @@ class RedisHub:
         optimizer = pickle.dumps(agent.optimizer.state_dict())
         self.model = pickle.dumps(agent.policy.state_dict())
 
-        self.redis.set("rac1.gaspar.model", self.model)
-        self.redis.set("rac1.gaspar.optimizer", optimizer)
-        self.redis.set("rac1.gaspar.model_timestamp", time.time())
+        self.redis.set("rac1.fitness-course.model", self.model)
+        self.redis.set("rac1.fitness-course.optimizer", optimizer)
+        self.redis.set("rac1.fitness-course.model_timestamp", time.time())
 
     def save_model_to_file(self, agent: PPOAgent, filename):
             torch.save({
@@ -152,24 +152,19 @@ class RedisHub:
         return self.buffer_full
 
     def get_action_mask(self):
-        mask = self.redis.get("rac1.gaspar.action_mask")
+        mask = self.redis.get("rac1.fitness-course.action_mask")
         if mask is not None:
             return torch.tensor(pickle.loads(mask), dtype=torch.bfloat16, device=self.device)
 
         return None
 
     def set_action_mask(self, mask):
-        self.redis.set("rac1.gaspar.action_mask", pickle.dumps(mask))
+        self.redis.set("rac1.fitness-course.action_mask", pickle.dumps(mask))
 
     def listen_for_messages(self, agent: PPOAgent):
         # Subscribe to the "replay_buffer" channel
         pubsub = self.redis.pubsub()
-        pubsub.subscribe("rac1.gaspar.rollout_buffer")
-
-        buffers = {}
-
-        for buffer in agent.replay_buffers:
-            buffers[buffer.owner] = agent.replay_buffers
+        pubsub.subscribe("rac1.fitness-course.rollout_buffer")
 
         # Start listening for messages
         try:
@@ -201,15 +196,8 @@ class RedisHub:
                         data = pickle.loads(data)
                         transition = data.transition
 
-                        if data.worker_name in buffers:
-                            replay_buffer = buffers[data.worker_name]
-                        else:
-                            buffers[data.worker_name] = RolloutBuffer(data.worker_name, 1000000, agent.buffer_size, agent.gamma,
-                                                                      agent.lambda_gae, device=agent.device)
-                            agent.replay_buffers.append(buffers[data.worker_name])
-                            replay_buffer = buffers[data.worker_name]
-
-                        replay_buffer.add(
+                        agent.buffer.add(
+                            data.worker_name,
                             transition.state,
                             transition.action,
                             transition.reward,
@@ -223,10 +211,6 @@ class RedisHub:
 
                         # replay_buffer.hidden_state = transition.hidden_state
                         # replay_buffer.cell_state = transition.cell_state
-
-                        # If the replay buffer is full, we need to notify the worker to stop sending messages
-                        if replay_buffer.ready:
-                            self.redis.publish(f"{data.worker_name}.full", "True")
 
         except IndexError as e:
             print(e)

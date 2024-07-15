@@ -25,7 +25,8 @@ class PPOAgent:
                  beta=0.1,
                  kl_threshold=0.1,
                  lambda_gae=0.95,
-                 device='cpu'
+                 device='cpu',
+                 buffer: RolloutBuffer | None = None,
                  ):
         self.gamma = gamma
         self.eps_clip = eps_clip
@@ -39,6 +40,7 @@ class PPOAgent:
 
         self.device = device
 
+        self.buffer = buffer
         self.buffer_size = buffer_size
         self.mini_batch_size = mini_batch_size
         self.batch_size = batch_size
@@ -50,10 +52,10 @@ class PPOAgent:
 
         self.action_mask = torch.ones(action_dim).to(device)
 
-        self.optimizer = torch.optim.Adam([
+        self.optimizer = torch.optim.AdamW([
             {'params': self.policy.actor.parameters(), 'lr': lr_actor},
             {'params': self.policy.critic.parameters(), 'lr': lr_critic}
-        ], eps=1e-5)
+        ], eps=1e-5, weight_decay=1e-4)
 
         self.mse_loss = nn.MSELoss()
 
@@ -89,87 +91,80 @@ class PPOAgent:
 
         # Optimize policy for K epochs
         for epoch in range(self.K_epochs):
-            for (n, buffer) in enumerate(self.replay_buffers):
-                for batch in buffer.get_batches(self.batch_size):
-                    self.optimizer.zero_grad()
+            for batch in self.buffer.get_batches(self.batch_size):
+                self.optimizer.zero_grad()
 
-                    for slice in range(0, self.batch_size, self.mini_batch_size):
-                        batch_slice = [item[slice:slice + self.mini_batch_size] for item in batch]
+                for slice in range(0, self.batch_size, self.mini_batch_size):
+                    batch_slice = [item[slice:slice + self.mini_batch_size] for item in batch]
 
-                        (states, actions, _rewards, dones, old_logprobs,
-                         # cell_states, hidden_states, advantages, returns) = zip(batch_slice)
-                         advantages, returns) = zip(batch_slice)
+                    (states, actions, _rewards, dones, old_logprobs,
+                     # cell_states, hidden_states, advantages, returns) = zip(batch_slice)
+                     advantages, returns) = zip(batch_slice)
 
-                        states = states[0].clone().to(self.device)
-                        actions = actions[0].clone().to(self.device)
-                        old_logprobs = old_logprobs[0].clone().to(self.device)
-                        advantages = advantages[0].clone().to(self.device)
-                        returns = returns[0].clone().to(self.device)
-                        # hidden_states = hidden_states[0].clone().permute(1, 0, 2).to(self.device)
-                        # cell_states = cell_states[0].clone().permute(1, 0, 2).to(self.device)
+                    states = states[0].clone().to(self.device)
+                    actions = actions[0].clone().to(self.device)
+                    old_logprobs = old_logprobs[0].clone().to(self.device)
+                    advantages = advantages[0].clone().to(self.device)
+                    returns = returns[0].clone().to(self.device)
+                    # hidden_states = hidden_states[0].clone().permute(1, 0, 2).to(self.device)
+                    # cell_states = cell_states[0].clone().permute(1, 0, 2).to(self.device)
 
-                        # Evaluating old actions and values
-                        logprobs, state_values, dist_entropy = self.policy.evaluate(states, actions, self.action_mask, None, None)
-                        # source_y_t = self.random_encoder(states[:, -1, :].squeeze())
+                    # Evaluating old actions and values
+                    logprobs, state_values, dist_entropy = self.policy.evaluate(states, actions, self.action_mask, None, None)
+                    # source_y_t = self.random_encoder(states[:, -1, :].squeeze())
 
-                        # intrinsic_rewards = self.random_encoder.compute_intrinsic_rewards(source_y_t[:, :, 0, 0], y_t.squeeze(), True)
-                        # intrinsic_rewards = intrinsic_rewards.squeeze().to(device)
+                    # intrinsic_rewards = self.random_encoder.compute_intrinsic_rewards(source_y_t[:, :, 0, 0], y_t.squeeze(), True)
+                    # intrinsic_rewards = intrinsic_rewards.squeeze().to(device)
 
-                        advantages = advantages.squeeze().detach()
-                        returns = returns.squeeze().detach()
-                        old_logprobs = old_logprobs.squeeze(dim=1).detach()
+                    advantages = advantages.squeeze().detach()
+                    returns = returns.squeeze().detach()
+                    old_logprobs = old_logprobs.squeeze(dim=1).detach()
 
-                        # advantages = advantages + self.beta * intrinsic_rewards
-                        # returns = returns + self.beta * intrinsic_rewards
+                    # advantages = advantages + self.beta * intrinsic_rewards
+                    # returns = returns + self.beta * intrinsic_rewards
 
-                        # Finding the ratio (pi_theta / pi_theta__old)
-                        ratios = torch.exp(logprobs.sum(dim=1) - old_logprobs.sum(dim=1))
-                        # ratios = torch.exp(logprobs - old_logprobs.squeeze(dim=1).detach())
+                    # Finding the ratio (pi_theta / pi_theta__old)
+                    ratios = torch.exp(logprobs.sum(dim=1) - old_logprobs.sum(dim=1))
+                    # ratios = torch.exp(logprobs - old_logprobs.squeeze(dim=1).detach())
 
-                        # Normalizing the advantages
-                        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-10)
+                    # Normalizing the advantages
+                    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-10)
 
-                        surr1 = advantages * ratios
-                        surr2 = advantages * torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip)
+                    surr1 = advantages * ratios
+                    surr2 = advantages * torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip)
 
-                        actor_loss = -(torch.min(surr1, surr2)).mean()
-                        critic_loss = self.mse_loss(state_values.squeeze(), returns.squeeze())
+                    actor_loss = -(torch.min(surr1, surr2)).mean()
+                    critic_loss = self.mse_loss(state_values.squeeze(), returns.squeeze())
 
-                        total_policy_loss += actor_loss.item()
-                        total_value_loss += critic_loss.item()
+                    total_policy_loss += actor_loss.item()
+                    total_value_loss += critic_loss.item()
 
-                        entropy_loss = dist_entropy.sum(dim=1).mean()
-                        total_entropy_loss += entropy_loss.item()
+                    entropy_loss = dist_entropy.sum(dim=1).mean()
+                    total_entropy_loss += entropy_loss.item()
 
-                        approx_kl = -((logprobs - old_logprobs).mean())
-                        total_approx_kl += abs(approx_kl.item())
-                        count += 1
+                    approx_kl = -((logprobs - old_logprobs).mean())
+                    total_approx_kl += abs(approx_kl.item())
+                    count += 1
 
-                        loss = actor_loss - self.ent_coef * entropy_loss + self.cl_coeff * critic_loss
+                    loss = actor_loss - self.ent_coef * entropy_loss + self.cl_coeff * critic_loss
 
-                        loss.backward()
-                        total_loss += loss.item()
+                    loss.backward()
+                    total_loss += loss.item()
 
-                        total_loss += loss.item()
+                    total_loss += loss.item()
 
-                        # Stop early if kl_divergence is above threshold
-                        if total_approx_kl / count > self.kl_threshold:
-                            print(f"Stopping early in {n}:{epoch}:{count} due to high KL divergence: {total_approx_kl / count }")
-                            break
+                    # Stop early if kl_divergence is above threshold
+                    if total_approx_kl / count > self.kl_threshold:
+                        print(f"Stopping early in {epoch}:{count} due to high KL divergence: {total_approx_kl / count }")
+                        break
 
-                    # Clip the gradients
-                    nn.utils.clip_grad_norm_(self.policy.actor.parameters(), self.max_grad_norm)
+                # Clip the gradients
+                nn.utils.clip_grad_norm_(self.policy.actor.parameters(), self.max_grad_norm)
 
-                    self.optimizer.step()
-
-                # Stop early if kl_divergence is above threshold
-                if total_approx_kl / count > self.kl_threshold:
-                    print("Lol. Lmao even")
-                    break
+                self.optimizer.step()
 
             # Stop early if kl_divergence is above threshold
             if total_approx_kl / count > self.kl_threshold:
-                print("Lmao")
                 break
 
         torch.cuda.empty_cache()
@@ -180,9 +175,7 @@ class PPOAgent:
                 diff = (param - old_params[name]).abs().sum().item()
                 print(f"Param: {name}, diff: {diff}")
 
-        # Clear the buffers
-        for buffer in self.replay_buffers:
-            buffer.clear()
+        self.buffer.clear()
 
         return (total_loss / count if count > 0 else 0,
                 total_policy_loss / count if count > 0 else 0,

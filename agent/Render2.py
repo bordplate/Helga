@@ -169,7 +169,16 @@ def main():
 
     setup_lighting()
 
-    game = RC1Game()
+    pid = 0
+
+    # Find the rpcs3 process
+    import psutil
+    for proc in reversed(list(psutil.process_iter())):
+        if proc.name() == "rpcs3":
+            pid = proc.pid
+            break
+
+    game = RC1Game(pid=pid)
     game.open_process()
     game.set_should_render(True)
 

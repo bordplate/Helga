@@ -13,7 +13,7 @@ from PPO.PPOAgent import PPOAgent
 
 from RedisHub import RedisHub
 
-features = 28 + 128 + 64*3
+features = 28 + 256*5
 sequence_length = 1
 
 configuration = {
@@ -56,7 +56,7 @@ def start_worker(args):
                 pid = proc.pid
                 break
 
-    env = GasparEnvironment(pid=pid, eval_mode=eval_mode, device=device)
+    env = FitnessCourseEnvironment(pid=pid, eval_mode=eval_mode, device=device)
 
     # Watchdog starts RPCS3 and the game for us if it's not already running
     env.start()
@@ -79,7 +79,7 @@ def start_worker(args):
             Plotter.start_plotting()
 
         # agent.policy.actor.max_log_std = 0.0000001
-        agent.policy.actor.max_log_std = 0.8
+        agent.policy.actor.max_log_std = 0.25
     else:
         agent.policy.actor.max_log_std = 0.8
 
@@ -137,6 +137,7 @@ def start_worker(args):
             if not eval_mode:
                 # redis.add(state_sequence, actions, reward, last_done, logprob, state_value, agent.policy.actor.hidden_state, agent.policy.actor.cell_state)
                 redis.add(state_sequence, actions, reward, last_done, logprob, state_value, None, None)
+                pass
             elif eval_mode:
                 # Visualize the actions
                 Visualizer.draw_state_value_face(state_value)
@@ -200,7 +201,7 @@ if __name__ == "__main__":
         parser.add_argument("--render", action="store_true", default=True)
         parser.add_argument("--force-watchdog", action="store_false")
         parser.add_argument("--eval", type=bool, action=argparse.BooleanOptionalAction, default=False)
-        parser.add_argument("--project-key", type=str, default="rac1.gaspar")
+        parser.add_argument("--project-key", type=str, default="rac1.fitness-course")
         parser.add_argument("--cpu-only", action="store_true", default=False)
 
         args = parser.parse_args()

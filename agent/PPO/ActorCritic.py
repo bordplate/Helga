@@ -4,6 +4,27 @@ from torch.distributions import Normal
 import torch.nn.functional as F
 
 
+class RayycastModule(nn.Module):
+    def __init__(self, input_dims, output_dims):
+        super(RayycastModule, self).__init__()
+        self.input_dims = input_dims
+        self.output_dims = output_dims
+
+        self.fc0 = nn.Linear(input_dims, 1024)
+        self.fc1 = nn.Linear(1024, 512)
+        self.fc2 = nn.Linear(512, self.output_dims)
+
+    def size(self):
+        return self.output_dims
+
+    def forward(self, x):
+        x = F.leaky_relu(self.fc0(x), 0.01)
+        x = F.leaky_relu(self.fc1(x), 0.01)
+        x = F.leaky_relu(self.fc2(x), 0.01)
+
+        return x
+
+
 class ActorCritic(nn.Module):
     def __init__(self, state_dim, action_dim, log_std, device='cpu'):
         super(ActorCritic, self).__init__()
@@ -60,24 +81,17 @@ class Actor(nn.Module):
         self.max_log_std = max_log_std
         self.feature_count = feature_count
 
-        self.hidden_dims = 2048
+        self.hidden_dims = 1024
         self.hidden_dims_halved = int(self.hidden_dims / 2)
 
         self.num_layers = 1
         self.max_action = 1.0
 
         # Linear layer to decode the static features of the state
-        self.fc0 = nn.Linear(feature_count - (128 + 64*3), self.hidden_dims_halved)
+        self.fc0 = nn.Linear(feature_count, self.hidden_dims)
 
-        # Raycasting data is processed by a separate sequence of linear layers
-        self.raycast = nn.Sequential(
-            nn.Linear((128 + 64*3), 512),
-            nn.LeakyReLU(),
-            nn.Linear(512, 512),
-            nn.LeakyReLU(),
-            nn.Linear(512, self.hidden_dims_halved),
-            nn.LeakyReLU()
-        )
+        # Raycasting data is processed by a CNN
+        # self.raycast = RayycastModule((128 + 64*3), self.hidden_dims_halved)
 
         # self.encoder = nn.Linear(self.hidden_dims, self.hidden_dims)
         # encoder_layers = nn.TransformerEncoderLayer(d_model=self.hidden_dims, nhead=8, dim_feedforward=1024,
@@ -88,12 +102,14 @@ class Actor(nn.Module):
 
         self.fc1 = nn.Linear(self.hidden_dims, self.hidden_dims)
         self.fc2 = nn.Linear(self.hidden_dims, self.hidden_dims)
-        self.fc3 = nn.Linear(self.hidden_dims, self.hidden_dims)
-        self.fc4 = nn.Linear(self.hidden_dims, self.hidden_dims)
+        # self.fc3 = nn.Linear(self.hidden_dims, self.hidden_dims)
+        # self.fc4 = nn.Linear(self.hidden_dims, self.hidden_dims)
+        self.fc5 = nn.Linear(self.hidden_dims, self.hidden_dims_halved)
+        self.fc6 = nn.Linear(self.hidden_dims_halved, self.hidden_dims_halved // 2)
 
-        self.decoder = nn.Linear(self.hidden_dims, self.action_dim)
+        self.decoder = nn.Linear(self.hidden_dims_halved // 2, self.action_dim)
 
-        self.log_std = nn.Linear(self.hidden_dims, self.action_dim)
+        self.log_std = nn.Linear(self.hidden_dims_halved // 2, self.action_dim)
 
         # self.init_weights()
 
@@ -112,7 +128,14 @@ class Actor(nn.Module):
                     nn.init.constant_(m.bias, 0)
 
         self.fc0.apply(init_weights)
-        self.raycast.apply(init_weights)
+        self.fc1.apply(init_weights)
+        self.fc2.apply(init_weights)
+        # self.fc3.apply(init_weights)
+        # self.fc4.apply(init_weights)
+        self.fc5.apply(init_weights)
+        self.fc6.apply(init_weights)
+
+        # self.raycast.apply(init_weights)
         self.decoder.apply(init_weights)
 
     def reset_lstm(self):
@@ -124,25 +147,29 @@ class Actor(nn.Module):
         Input shape: (batch_size, sequence_length, feature_count)
         """
         # Encode the static features of the state
-        x = F.leaky_relu(self.fc0(state[:, :, :self.feature_count - (128 + 64*3)]), 0.01)
+        # x = F.leaky_relu(self.fc0(state[:, :, :self.feature_count - (128 + 64*3)]), 0.01)
 
         # The raycasting parts of the state gets pre-processed by a separate sequence of linear layers
-        raycasting_data = state[:, :, -(128 + 64*3):]  # Last 128 features are raycasting data
+        # raycasting_data = state[:, :, -(128 + 64*3):]  # Reshape to (batch_size*sequence_length, channels, height, width)
 
         # Process all raycasting data through the raycasting network
-        raycast_out = self.raycast(raycasting_data)
+        # raycast_out = self.raycast(raycasting_data)
 
         # Concatenate the raycast output with the non-raycasting part of state
-        x = torch.cat((x, raycast_out), dim=2)
+        # x = torch.cat((x, raycast_out), dim=2)
 
         # x, (hidden_state, cell_state) = self.lstm(x, (hidden_state, cell_state))
 
-        x = x[:, -1, :]
+        # x = x[:, -1, :]
+        x = state[:, -1, :]
 
+        x = F.leaky_relu(self.fc0(x), 0.01)
         x = F.leaky_relu(self.fc1(x), 0.01)
         x = F.leaky_relu(self.fc2(x), 0.01)
-        x = F.leaky_relu(self.fc3(x), 0.01)
-        x = F.leaky_relu(self.fc4(x), 0.01)
+        # x = F.leaky_relu(self.fc3(x), 0.01)
+        # x = F.leaky_relu(self.fc4(x), 0.01)
+        x = F.leaky_relu(self.fc5(x), 0.01)
+        x = F.leaky_relu(self.fc6(x), 0.01)
 
         mu = F.tanh(self.decoder(x))
 
@@ -185,35 +212,30 @@ class Critic(nn.Module):
         self.action_dim = action_dim
         self.feature_count = feature_count
 
-        self.hidden_dims = 2048 + 512
+        self.hidden_dims = 1024
         self.hidden_dims_halved = int(self.hidden_dims / 2)
 
         # Linear layer to decode the static features of the state
-        self.fc0 = nn.Linear(feature_count - (128 + 64*3), self.hidden_dims_halved)
+        self.fc0 = nn.Linear(feature_count, self.hidden_dims)
 
         # Raycasting data is processed by a separate sequence of linear layers
-        self.raycast = nn.Sequential(
-            nn.Linear((128 + 64*3), 512),
-            nn.LeakyReLU(),
-            nn.Linear(512, 512),
-            nn.LeakyReLU(),
-            nn.Linear(512, self.hidden_dims_halved),
-            nn.LeakyReLU()
-        )
+        # self.raycast = RayycastModule()
 
         # self.lstm = nn.LSTM(self.hidden_dims, self.hidden_dims, 1, batch_first=True)
 
         self.fc1 = nn.Linear(self.hidden_dims, self.hidden_dims)
         self.fc2 = nn.Linear(self.hidden_dims, self.hidden_dims)
-        self.fc3 = nn.Linear(self.hidden_dims, self.hidden_dims)
-        self.fc4 = nn.Linear(self.hidden_dims, self.hidden_dims)
+        # self.fc3 = nn.Linear(self.hidden_dims, self.hidden_dims)
+        # self.fc4 = nn.Linear(self.hidden_dims, self.hidden_dims)
+        self.fc5 = nn.Linear(self.hidden_dims, self.hidden_dims_halved)
+        self.fc6 = nn.Linear(self.hidden_dims_halved, self.hidden_dims_halved)
 
         # self.encoder = nn.Linear(self.hidden_dims, self.hidden_dims)
         # encoder_layers = nn.TransformerEncoderLayer(d_model=self.hidden_dims, nhead=8, dim_feedforward=512,
         #                                             batch_first=True)
         # self.transformer_encoder = nn.TransformerEncoder(encoder_layers, num_layers=12)
 
-        self.decoder = nn.Linear(self.hidden_dims, 1)
+        self.decoder = nn.Linear(self.hidden_dims_halved, 1)
 
         self.to(device=self.device)
         self.to(dtype=torch.bfloat16)
@@ -230,7 +252,14 @@ class Critic(nn.Module):
                     nn.init.constant_(m.bias, 0)
 
         self.fc0.apply(init_weights)
-        self.raycast.apply(init_weights)
+        self.fc1.apply(init_weights)
+        self.fc2.apply(init_weights)
+        # self.fc3.apply(init_weights)
+        # self.fc4.apply(init_weights)
+        self.fc5.apply(init_weights)
+        self.fc6.apply(init_weights)
+
+        # self.raycast.apply(init_weights)
         # self.encoder.apply(init_weights)
         self.decoder.apply(init_weights)
 
@@ -252,25 +281,32 @@ class Critic(nn.Module):
         # state = state[:, -1, :]
 
         # Encode the static features of the state
-        x = F.leaky_relu(self.fc0(state[:, :, :self.feature_count - (128 + 64*3)]), 0.01)
-
-        # The raycasting parts of the state gets pre-processed by a separate sequence of linear layers
-        raycasting_data = state[:, :, -(128 + 64*3):]  # Last 128 features are raycasting data
-
-        # Process all raycasting data through the raycasting network
-        raycast_out = self.raycast(raycasting_data)
-
-        # Concatenate the raycast output with the non-raycasting part of state
-        x = torch.cat((x, raycast_out), dim=2)
+        # x = F.leaky_relu(self.fc0(state[:, :, :self.feature_count - (128 + 64*3)]), 0.01)
+        #
+        # # The raycasting parts of the state gets pre-processed by a separate sequence of linear layers
+        # # The raycasting parts of the state gets pre-processed by a separate sequence of linear layers
+        # raycasting_data = state[:, :, -(128 + 64*3):].view(-1, 5, 8, 8)  # Reshape to (batch_size*sequence_length, channels, height, width)
+        #
+        # # Process all raycasting data through the raycasting network
+        # raycast_out = self.raycast(raycasting_data)
+        # raycast_out = raycast_out.view(state.size(0), state.size(1),
+        #                                -1)  # Reshape back to (batch_size, sequence_length, features)
+        #
+        # # Concatenate the raycast output with the non-raycasting part of state
+        # x = torch.cat((x, raycast_out), dim=2)
 
         # x, _ = self.lstm(x, (hidden_states, cell_states))
 
-        x = x[:, -1, :]
+        # x = x[:, -1, :]
+        x = state[:, -1, :]
 
+        x = F.leaky_relu(self.fc0(x), 0.01)
         x = F.leaky_relu(self.fc1(x), 0.01)
         x = F.leaky_relu(self.fc2(x), 0.01)
-        x = F.leaky_relu(self.fc3(x), 0.01)
-        x = F.leaky_relu(self.fc4(x), 0.01)
+        # x = F.leaky_relu(self.fc3(x), 0.01)
+        # x = F.leaky_relu(self.fc4(x), 0.01)
+        x = F.leaky_relu(self.fc5(x), 0.01)
+        x = F.leaky_relu(self.fc6(x), 0.01)
 
         # Transformer
         # x = self.encoder(x)

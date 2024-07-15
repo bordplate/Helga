@@ -96,11 +96,11 @@ def render_raycast_data(raycast_data):
     The last 64 values are data about which entity it has collided with. Values below 0 should be white. 0 and up should be colored.
     This function renders a heatmap, where collision (moby data below 0) is white and other entities are colored. The distance decides the opacity of each pixel.
     """
-    mobys = raycast_data[-64:].copy()
-    raycast_data = raycast_data[:-64].copy()
+    mobys = raycast_data[-256:].copy()
+    raycast_data = raycast_data[:-256].copy()
 
-    mobys = mobys.reshape(8, 8)
-    raycast_data = raycast_data.reshape(8, 8)
+    mobys = mobys.reshape(16, 16)
+    raycast_data = raycast_data.reshape(16, 16)
 
     # mobys = np.repeat(mobys, 4, axis=1)
     # raycast_data = np.repeat(raycast_data, 4, axis=1)
@@ -116,12 +116,12 @@ def render_raycast_data(raycast_data):
     distance_data = 1 - raycast_data
 
     # Create a color scale for mobys data
-    colors = np.zeros((8, 8, 3), dtype=np.uint8)
+    colors = np.zeros((16, 16, 3), dtype=np.uint8)
     norm_mobys = mobys / 4096  # Normalize mobys data to range 0-1
 
     # Full color spectrum interpolation from red to white
-    for i in range(8):
-        for j in range(8):
+    for i in range(16):
+        for j in range(16):
             (r, g, b) = (255, 255, 255)
 
             if norm_mobys[i, j] >= 0:
@@ -170,8 +170,8 @@ def render_raycast_data(raycast_data):
     colors = np.rot90(colors)
 
     # Scale up for better visibility
-    colors = np.repeat(colors, 50, axis=0)
-    colors = np.repeat(colors, 50, axis=1)
+    colors = np.repeat(colors, 50//2, axis=0)
+    colors = np.repeat(colors, 50//2, axis=1)
 
     # Create a Pygame surface
     raycast_surface = pygame.Surface(colors.shape[:2])

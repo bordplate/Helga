@@ -135,7 +135,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
 
         # 70% chance to spawn at random checkpoint, 30% in evaluation mode
         if np.random.rand() < (0.7 if not self.eval_mode else 0):
-            checkpoint = np.random.randint(0, 2)
+            checkpoint = np.random.randint(0, 4)
             spawn_position = self.checkpoints_template[checkpoint]
             self.checkpoint = (checkpoint + 1) % len(self.checkpoints)
 
@@ -224,7 +224,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
 
         if death_count != self.game.get_death_count():
             terminal = True
-            reward += self.reward("death_penalty", -1.5)
+            reward += self.reward("death_penalty", -5)
 
         # Get updated player info
         looking_at_checkpoint = self.game.get_camera_position().is_looking_at(self.game.get_camera_rotation(), checkpoint_position)
@@ -298,7 +298,6 @@ class FitnessCourseEnvironment(RatchetEnvironment):
 
             reward += self.reward("higher_grounded_reward", r)
 
-            print(f"\nGrounded: {r}")
             self.highest_grounded_z = position.z
 
         if distance_from_checkpoint < self.closest_distance_to_checkpoint:
@@ -335,7 +334,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         # Check that the agent hasn't stopped progressing
         if self.time_since_last_checkpoint > 30 * 30:  # 30 in-game seconds
             terminal = True
-            reward += self.reward("timeout_penalty", -1.0)
+            reward += self.reward("timeout_penalty", -10.0)
 
         # Discourage standing still
         # if distance_delta <= 0.01 and self.timer > 30 * 5:
@@ -414,6 +413,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
             np.interp(distance_from_ground, (-64, 64), (-1, 1)),  # 17
             np.interp(speed, (0, 2), (-1, 1)),  # 18
             np.interp(player_state, (0, 255), (-1, 1)),  # 19
+            np.interp((30 * 30 - self.time_since_last_checkpoint) / 30, (0, 30), (-1, 1)),
 
             np.interp(self.timer, (0, 1000 * 1000), (-1, 1)),  # 20
 
@@ -427,7 +427,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
             np.interp(action, (0, 0xFFFFFFFF), (-1, 1)),  # 25
 
             # Collision data
-            *self.game.get_collisions()  # 64 collisions + 64 classes + 64*3 normals
+            *self.game.get_collisions_with_normals()  # 64 collisions + 64 classes + 64*3 normals
         ]
 
         # state = [
