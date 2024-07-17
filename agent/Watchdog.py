@@ -44,14 +44,31 @@ class Watchdog:
         if self.render:
             process_name = f"{process_name}-eval"
 
-        process = subprocess.Popen([
-                rf"/bin/bash", "-c",
-                f"exec -a {process_name} /usr/bin/rpcs3 --no-gui --config {config_file} {self.game_path}",
-            ],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
+        # If Linux, open with bash
+        if os.name == "posix":
+            process = subprocess.Popen([
+                    rf"/bin/bash", "-c",
+                    f"exec -a {process_name} /usr/bin/rpcs3 --no-gui --config {config_file} {self.game_path}",
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        elif os.name == "nt":
+            process = subprocess.Popen([
+                    rf"C:\Program Files\RPCS3\rpcs3.exe",
+                    self.game_path,
+                    "--no-gui",
+                    "--config", config_file
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        else:
+            print("Watchdog: Unsupported OS.")
+            return False
+
         # Get the PID of the process
         self.pid = process.pid
 

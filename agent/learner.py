@@ -18,7 +18,7 @@ class Config:
     learning_rate_actor     = 3e-4
     features                = 28 + 256*5
     actions                 = 7
-    buffer_size             = 1024 * 150
+    buffer_size             = 1024 * 50
     batch_size              = 1024 * 50
     mini_batch_size         = 1024 * 50
     sequence_length         = 1

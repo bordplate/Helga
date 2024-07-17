@@ -1,3 +1,4 @@
+import numba
 import torch
 import torch.nn as nn
 import numpy as np
@@ -73,6 +74,61 @@ class PPOAgent:
 
         return action, action_logprob, state_value
 
+    @torch.no_grad()
+    def compute_returns_and_advantages(self,
+                                       rewards: torch.Tensor,
+                                       dones: torch.Tensor,
+                                       state_values: torch.Tensor,
+                                       last_value: torch.bfloat16,
+                                       done: torch.bool) -> tuple[torch.Tensor, torch.Tensor]:
+        # Convert tensors to numpy arrays
+        rewards_np = rewards.to(dtype=torch.float32).cpu().numpy()
+        dones_np = dones.to(dtype=torch.float32).cpu().numpy()
+        state_values_np = state_values.to(dtype=torch.float32).cpu().numpy()
+        last_value_np = last_value.to(dtype=torch.float32).cpu().numpy()
+
+        # Call the Numba-optimized function
+        advantages_np = numba_compute_advantages(rewards_np, dones_np, state_values_np,
+                                                 self.gamma, self.lambda_gae, last_value_np[0], float(done.cpu().numpy()))
+
+        # Convert back to tensors
+        advantages = torch.tensor(advantages_np, dtype=torch.bfloat16, device=self.device)
+        returns = advantages + state_values
+
+        return advantages, returns
+
+    # @torch.no_grad()
+    # def compute_returns_and_advantages(self,
+    #                                    rewards: torch.Tensor,
+    #                                    dones: torch.Tensor,
+    #                                    state_values: torch.Tensor,
+    #                                    last_value: torch.bfloat16,
+    #                                    done: torch.bool) -> tuple[torch.Tensor, torch.Tensor]:
+    #     # Initialize tensors
+    #     advantages = torch.zeros_like(rewards).to(self.device)
+    #
+    #     # Precompute masks
+    #     masks = 1.0 - dones.float()
+    #     masks = torch.cat((masks[1:], torch.tensor([1.0 - float(done)], device=self.device)))
+    #
+    #     # Initialize the last_gae_lam and next_value
+    #     last_gae_lam = torch.zeros(1, device=self.device)
+    #     next_value = last_value * (1.0 - float(done))
+    #
+    #     # Compute the deltas and masks
+    #     deltas = rewards + self.gamma * torch.cat(
+    #         (state_values[1:] * masks[:-1], torch.tensor([next_value], device=self.device))) - state_values
+    #
+    #     # Reverse accumulate the advantages
+    #     for step in reversed(range(len(rewards))):
+    #         last_gae_lam = deltas[step] + self.gamma * self.lambda_gae * last_gae_lam * masks[step]
+    #         advantages[step] = last_gae_lam
+    #
+    #     # Compute returns
+    #     returns = advantages + state_values
+    #
+    #     return advantages, returns
+
     def learn(self):
         self.policy.train()
         self.policy.actor.train()
@@ -97,27 +153,33 @@ class PPOAgent:
                 for slice in range(0, self.batch_size, self.mini_batch_size):
                     batch_slice = [item[slice:slice + self.mini_batch_size] for item in batch]
 
-                    (states, actions, _rewards, dones, old_logprobs,
+                    (states, actions, _rewards, dones, old_logprobs) = zip(batch_slice)
                      # cell_states, hidden_states, advantages, returns) = zip(batch_slice)
-                     advantages, returns) = zip(batch_slice)
+                     # advantages, returns) = zip(batch_slice)
 
                     states = states[0].clone().to(self.device)
                     actions = actions[0].clone().to(self.device)
                     old_logprobs = old_logprobs[0].clone().to(self.device)
-                    advantages = advantages[0].clone().to(self.device)
-                    returns = returns[0].clone().to(self.device)
+                    _rewards = _rewards[0].clone().to(self.device)
+                    dones = dones[0].clone().to(self.device)
+
+                    # advantages = advantages[0].clone().to(self.device)
+                    # returns = returns[0].clone().to(self.device)
                     # hidden_states = hidden_states[0].clone().permute(1, 0, 2).to(self.device)
                     # cell_states = cell_states[0].clone().permute(1, 0, 2).to(self.device)
 
                     # Evaluating old actions and values
                     logprobs, state_values, dist_entropy = self.policy.evaluate(states, actions, self.action_mask, None, None)
+
+                    advantages, returns = self.compute_returns_and_advantages(
+                        _rewards.detach(), dones.detach(), state_values.squeeze().detach(), state_values[-1].detach(), dones[-1].detach()
+                    )
+
                     # source_y_t = self.random_encoder(states[:, -1, :].squeeze())
 
                     # intrinsic_rewards = self.random_encoder.compute_intrinsic_rewards(source_y_t[:, :, 0, 0], y_t.squeeze(), True)
                     # intrinsic_rewards = intrinsic_rewards.squeeze().to(device)
 
-                    advantages = advantages.squeeze().detach()
-                    returns = returns.squeeze().detach()
                     old_logprobs = old_logprobs.squeeze(dim=1).detach()
 
                     # advantages = advantages + self.beta * intrinsic_rewards
@@ -160,6 +222,7 @@ class PPOAgent:
 
                 # Clip the gradients
                 nn.utils.clip_grad_norm_(self.policy.actor.parameters(), self.max_grad_norm)
+                nn.utils.clip_grad_norm_(self.policy.critic.parameters(), self.max_grad_norm)
 
                 self.optimizer.step()
 
@@ -182,3 +245,19 @@ class PPOAgent:
                 total_value_loss / count if count > 0 else 0,
                 total_entropy_loss / count if count > 0 else 0,
                 total_approx_kl / count if count > 0 else 0)
+
+
+@numba.jit(nopython=True)
+def numba_compute_advantages(rewards, dones, state_values, gamma, lambda_gae, last_value, done):
+    advantages = np.zeros_like(rewards)
+    masks = 1.0 - dones
+    masks = np.append(masks[1:], 1.0 - done)
+    next_value = last_value * (1.0 - done)
+    deltas = rewards + gamma * np.append(state_values[1:] * masks[:-1], next_value) - state_values
+
+    last_gae_lam = 0
+    for step in range(len(rewards) - 1, -1, -1):  # Manual reverse
+        last_gae_lam = deltas[step] + gamma * lambda_gae * last_gae_lam * masks[step]
+        advantages[step] = last_gae_lam
+
+    return advantages

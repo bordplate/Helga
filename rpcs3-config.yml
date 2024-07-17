@@ -1,6 +1,6 @@
 Core:
   PPU Decoder: Recompiler (LLVM)
-  PPU Threads: 2
+  PPU Threads: 4
   PPU Debug: false
   PPU Calling History: false
   Save LLVM logs: false
@@ -25,8 +25,8 @@ Core:
   Accurate Cache Line Stores: false
   Accurate RSX reservation access: false
   RSX FIFO Accuracy: Fast
-  SPU Verification: true
-  SPU Cache: true
+  SPU Verification: false
+  SPU Cache: false
   SPU Profiler: false
   MFC Commands Shuffling Limit: 0
   MFC Commands Timeout: 0

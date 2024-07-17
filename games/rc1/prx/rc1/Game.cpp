@@ -12,6 +12,7 @@
 
 #include <sys/random_number.h>
 #include <sysutil/sysutil_msgdialog.h>
+#include <sys/ppu_thread.h>
 
 #include "views/RemoteView.h"
 
@@ -82,16 +83,18 @@ LogLevel Logger::log_level_ = Debug;
 
 #define oscillation_offset_x *((float*)0xB00060)
 #define oscillation_offset_y *((float*)0xB00064)
-#define collisions_distance ((float*)0xB00100)
-#define collisions_class ((int*)0xB00200)
 
 #define collisions_mobys ((Moby**)0xB00300)
 
 #define checkpoint_position ((Vec4*)0xB00400)
 
-#define collisions_normals_x ((float*)0xB00600)
-#define collisions_normals_y ((float*)0xB00700)
-#define collisions_normals_z ((float*)0xB00A00)
+#define BASE_ADDRESS 0xB00600
+
+#define collisions_distance  ((float*)(BASE_ADDRESS + (0x100 * 4 * 0)))
+#define collisions_class     ((int*)(BASE_ADDRESS + (0x100 * 4 * 1)))
+#define collisions_normals_x ((float*)(BASE_ADDRESS + (0x100 * 4 * 2)))
+#define collisions_normals_y ((float*)(BASE_ADDRESS + (0x100 * 4 * 3)))
+#define collisions_normals_z ((float*)(BASE_ADDRESS + (0x100 * 4 * 4)))
 
 
 #define CHECKPOINT_ROTATION_SPEED 0.001*3.14159
@@ -130,9 +133,9 @@ void Game::start() {
     skid_address = 0;
 
     // Clear all collision_mobys
-    for (int i = 0; i < 64; i++) {
-        collisions_mobys[i] = nullptr;
-    }
+    //for (int i = 0; i < 64; i++) {
+    //    collisions_mobys[i] = nullptr;
+    //}
 
     death_count = 0;
 }
@@ -155,7 +158,8 @@ void Game::on_tick() {
         seen_planets[0] = 1;
         seen_planets[9] = 1;
         *(int*)0xa10700 = 1;
-        *(int*)0xa10704 = (int)9;
+        *(int*)0xa10704 = (int)3;  // Kerwan
+        //*(int*)0xa10704 = (int)9;  // Gaspar
         //*(int*)0x969c70 = (int)5;
     }
 
@@ -190,20 +194,30 @@ void Game::on_tick() {
         Moby::delete_all(1885);
         Moby::delete_all(1023);
         Moby::delete_all(52);
+
+        //if (death_count <= 0) {
+        //    player_pos.z = -10000;
+        //}
 	}
 
     if (!current_view) {
         RemoteView* view = new RemoteView();
         this->transition_to(view);
     } else if (current_planet != 0 && frame_count > 2) {
+        if (!camera_moby || camera_moby->state >= 0x7f) {
+            //camera_moby = Moby::find_first(0x3ef);
+        }
+        camera_moby = Moby::find_first(0x3ef);
+
         RemoteView* view = (RemoteView*)current_view;
 
         // If we're running with renderer, we should render checkpoints
-        if (should_render) {
+        //if (should_render) {
+        if (1) {
             if (checkpoint_moby == nullptr || checkpoint_moby->state >= 0x7f) {
                 checkpoint_moby = Moby::spawn(500, 0, 0);
                 checkpoint_moby->pUpdate = nullptr;
-                checkpoint_moby->collision = nullptr;
+                //checkpoint_moby->collision = nullptr;
                 checkpoint_moby->scale = 0.2f;
                 checkpoint_moby->alpha = 64;
             }
@@ -216,80 +230,8 @@ void Game::on_tick() {
             checkpoint_moby->position.z = checkpoint_position->z;
         }
 
-////        Vec3 rot = Normalize(*(Vec3*)&player_rot);
-//
-//        Vec3 forward = Vec3();
-////        forward.z = std::cos(rot.y) * std::sin(rot.z);
-////        forward.x = -std::sin(rot.z);
-////        forward.y = std::cos(rot.y) * std::cos(rot.z);
-//        forward.x = cos_approx(player_rot.z);
-//        forward.y = sin_approx(player_rot.z);
-//        forward.z = 0;
-//
-//        Vec4 ahead = Vec4();
-//        ahead.x = player_pos.x + 20.0f * forward.x;
-//        ahead.y = player_pos.y + 20.0f * forward.y;
-//        ahead.z = player_pos.z + 0.5f;
-//        ahead.w = 1;
-//
-////        if (test_moby == nullptr) {
-////            test_moby = Moby::spawn(500, 0, 0);
-////            test_moby->pUpdate = nullptr;
-////        }
-////
-////        test_moby->position.x = ahead.x;
-////        test_moby->position.y = ahead.y;
-////        test_moby->position.z = player_pos.z;
-//
-////        Logger::info("Foward: x: %.2f y: %.2f z: %.2f. Position: x1: %.2f y1: %.2f z1: %.2f; Forward: x2: %.2f y2: %.2f z2: %.2f",
-////                     forward.x, forward.y, forward.z,
-////                     player_pos.x, player_pos.y, player_pos.z,
-////                     ahead.x, ahead.y, ahead.z);
-//
-//        int coll = coll_line(&player_pos, &ahead, 0x4, ratchet_moby);
-
-//        Vec3 forward = Vec3();
-//        forward.x = cos_approx(player_rot.y) * cos_approx(player_rot.z);
-//        forward.y = cos_approx(player_rot.y) * sin_approx(player_rot.z);
-//        forward.z = -sin_approx(player_rot.y);
-//
-//        if (game_state == PlayerControl) {
-//            Logger::debug("%f, %f, %f", forward.x, forward.y, forward.z);
-//        }
-
         // Raycast in a grid pattern extending from the player with the given fov
         // We also oscillate the rays to the left and right to get a wider field of view
-
-//        if (oscillation_direction_x) {
-//            oscillation_offset_x += 1.0f;
-//        } else {
-//            oscillation_offset_x -= 1.0f;
-//        }
-//
-//        if (oscillation_offset_x >= 3.0f) {
-//            oscillation_direction_x = false;
-//
-//            if (oscillation_direction_y) {
-//                oscillation_offset_y += 1.0f;
-//            } else {
-//                oscillation_offset_y -= 1.0f;
-//            }
-//
-//            if (oscillation_offset_y >= 3.0f) {
-//                oscillation_direction_y = false;
-//            } else if (oscillation_offset_y <= 0.0f) {
-//                oscillation_direction_y = true;
-//            }
-//
-//        } else if (oscillation_offset_x <= 0.0f) {
-//            oscillation_direction_x = true;
-//        }
-
-        if (death_count != last_death_count) {
-            for (int i = 0; i < 64; i++) {
-                collisions_mobys[i] = nullptr;
-            }
-        }
 
         last_death_count = death_count;
 
@@ -314,8 +256,15 @@ void Game::on_tick() {
         float ray_wide = 90.0f;
 
         float fov = 64.0f;
-        int rows = 8;
-        int cols = 8;
+        int rows = 16;
+        int cols = 16;
+
+        // Store camera collision and set it to null
+        unsigned short *collision;
+        if (camera_moby != nullptr) {
+            collision = camera_moby->collision;
+            camera_moby->collision = nullptr;
+        }
 
         for (int i = 0; i < rows; i++) {
             for (int j = 0; j < cols; j++) {
@@ -327,9 +276,9 @@ void Game::on_tick() {
 
                 // To avoid colliding with the camera itself, we start the ray a bit ahead of the camera
                 Vec4 ray_start = camera_pos;
-                ray_start.x += 1.0f * up.x;
-                ray_start.y += 1.0f * up.y;
-                ray_start.z += 1.0f * up.z;
+                ray_start.x += -1.0f * forward.x;
+                ray_start.y += -1.0f * forward.y;
+                ray_start.z += -1.0f * forward.z;
 
                 // Apply oscillation
                 ray.x += oscillation_offset_x * left.x + oscillation_offset_y * up.x;
@@ -387,166 +336,16 @@ void Game::on_tick() {
             }
         }
 
-//        Vec4 ahead = Vec4();
-//        ahead.x = player_pos.x + ray_distance * forward.x;
-//        ahead.y = player_pos.y + ray_distance * forward.y;
-//        ahead.z = player_pos.z + ray_distance * forward.z;
-//        ahead.w = 1;
-//
-//        Vec4 ahead_up = Vec4();
-//        ahead_up.x = player_pos.x + ray_distance * forward.x + (ray_wide/2) * ratchet_moby->up.x;
-//        ahead_up.y = player_pos.y + ray_distance * forward.y + (ray_wide/2) * ratchet_moby->up.y;
-//        ahead_up.z = player_pos.z + ray_distance * forward.z + (ray_wide/2) * ratchet_moby->up.z;
-//        ahead_up.w = 1;
-//
-//        // Calculate ahead_left and ahead_right
-//        Vec4 ahead_left = Vec4();
-//        ahead_left.x = player_pos.x + ray_distance * forward.x + ray_wide * left.x;
-//        ahead_left.y = player_pos.y + ray_distance * forward.y + ray_wide * left.y;
-//        ahead_left.z = player_pos.z + ray_distance * forward.z + ray_wide * left.z;
-//        ahead_left.w = 1;
-//
-//        Vec4 ahead_right = Vec4();
-//        ahead_right.x = player_pos.x + ray_distance * forward.x + ray_wide * right.x;
-//        ahead_right.y = player_pos.y + ray_distance * forward.y + ray_wide * right.y;
-//        ahead_right.z = player_pos.z + ray_distance * forward.z + ray_wide * right.z;
-//        ahead_right.w = 1;
-//
-//        Vec4 ahead_down = Vec4();
-//        ahead_down.x = player_pos.x + ray_distance * forward.x - (ray_wide/2) * ratchet_moby->up.x;
-//        ahead_down.y = player_pos.y + ray_distance * forward.y - (ray_wide/2) * ratchet_moby->up.y;
-//        ahead_down.z = player_pos.z + ray_distance * forward.z - (ray_wide/2) * ratchet_moby->up.z;
-//        ahead_down.w = 1;
-
-//        if (test_moby == nullptr) {
-//            test_moby = Moby::spawn(500, 0, 0);
-//            test_moby->pUpdate = nullptr;
-//            test_moby->collision = nullptr;
-//        }
-//
-//        test_moby->position.x = ahead_down.x;
-//        test_moby->position.y = ahead_down.y;
-//        test_moby->position.z = ahead_down.z;
-//
-//        if (test_moby_a == nullptr) {
-//            test_moby_a = Moby::spawn(500, 0, 0);
-//            test_moby_a->pUpdate = nullptr;
-//            test_moby_a->collision = nullptr;
-//        }
-//
-//        test_moby_a->position.x = ahead_up.x;
-//        test_moby_a->position.y = ahead_up.y;
-//        test_moby_a->position.z = ahead_up.z;
-//
-//        if (test_moby_l == nullptr) {
-//            test_moby_l = Moby::spawn(500, 0, 0);
-//            test_moby_l->pUpdate = nullptr;
-//            test_moby_l->collision = nullptr;
-//        }
-//
-//        test_moby_l->position.x = ahead_left.x;
-//        test_moby_l->position.y = ahead_left.y;
-//        test_moby_l->position.z = ahead_left.z;
-//
-//        if (test_moby_r == nullptr) {
-//            test_moby_r = Moby::spawn(500, 0, 0);
-//            test_moby_r->pUpdate = nullptr;
-//            test_moby_r->collision = nullptr;
-//        }
-//
-//        test_moby_r->position.x = ahead_right.x;
-//        test_moby_r->position.y = ahead_right.y;
-//        test_moby_r->position.z = ahead_right.z;
-
-//        collision_ahead = -32.0f;
-//        collision_up = -32.0f;
-//        collision_down = -32.0f;
-//        collision_left = -32.0f;
-//        collision_right = -32.0f;
-//
-//        collision_class_ahead = 0;
-//        collision_class_up = 0;
-//        collision_class_down = 0;
-//        collision_class_left = 0;
-//        collision_class_right = 0;
-//
-//        Vec4 source_vect = Vec4(player_pos.x, player_pos.y, player_pos.z + 0.5f, player_pos.w);
-//
-//        // Collision checks
-//        int coll_forward = coll_line(&source_vect, &ahead, 0x24, ratchet_moby, nullptr);
-//
-//        view->coll_class = 0;
-//
-//        if (coll_forward) {
-//            collision_ahead = distance(source_vect, coll_output.ip);
-//
-//            if (coll_output.pMoby) {
-//                collision_class_ahead = coll_output.pMoby->oClass;
-//                view->coll_class = coll_output.pMoby->oClass;
-//            }
-//        }
-//
-//        int coll_up = coll_line(&source_vect, &ahead_up, 0x24, ratchet_moby, nullptr);
-//
-//        view->coll_up_class = 0;
-//
-//        if (coll_up) {
-//            collision_up = distance(source_vect, coll_output.ip);
-//
-//            if (coll_output.pMoby) {
-//                collision_class_up = coll_output.pMoby->oClass;
-//                view->coll_up_class = coll_output.pMoby->oClass;
-//            }
-//        }
-//
-//        int coll_down = coll_line(&source_vect, &ahead_down, 0x24, ratchet_moby, nullptr);
-//
-//        view->coll_down_class = 0;
-//
-//        if (coll_down) {
-//            collision_down = distance(source_vect, coll_output.ip);
-//
-//            if (coll_output.pMoby) {
-//                collision_class_down = coll_output.pMoby->oClass;
-//                view->coll_down_class = coll_output.pMoby->oClass;
-//            }
-//        }
-//
-//        int coll_left = coll_line(&source_vect, &ahead_left, 0x24, ratchet_moby, nullptr);
-//
-//        view->coll_left_class = 0;
-//
-//        if (coll_left) {
-//            collision_left = distance(source_vect, coll_output.ip);
-//
-//            if (coll_output.pMoby) {
-//                collision_class_left = coll_output.pMoby->oClass;
-//                view->coll_left_class = coll_output.pMoby->oClass;
-//            }
-//        }
-//
-//        int coll_right = coll_line(&source_vect, &ahead_right, 0x24, ratchet_moby, nullptr);
-//
-//        view->coll_right_class = 0;
-//
-//        if (coll_right) {
-//            collision_right = distance(source_vect, coll_output.ip);
-//
-//            if (coll_output.pMoby) {
-//                collision_class_right = coll_output.pMoby->oClass;
-//                view->coll_right_class = coll_output.pMoby->oClass;
-//            }
-//        }
-//
-//        view->coll = collision_ahead;
-//        view->coll_up = collision_up;
-//        view->coll_down = collision_down;
-//        view->coll_left = collision_left;
-//        view->coll_right = collision_right;
+        // Restore camera collision
+        if (camera_moby != nullptr) {
+            camera_moby->collision = collision;
+        }
     }
 
 
-    while (progress_frame_count < custom_frame_count && current_planet != 0) {}
+    while (progress_frame_count < custom_frame_count && current_planet != 0) {
+        sys_ppu_thread_yield();
+    }
     custom_frame_count += 1;
 
     return;
@@ -560,9 +359,9 @@ void Game::before_player_spawn() {
 
     if (should_render) {
         // Clear collision_mobys
-        for (int i = 0; i < 64; i++) {
-            collisions_mobys[i] = nullptr;
-        }
+        //for (int i = 0; i < 64; i++) {
+        //    collisions_mobys[i] = nullptr;
+        //}
     }
 }
 

@@ -15,30 +15,28 @@ PROCESS_ALL_ACCESS = 0x1F0FFF
 
 
 class Process:
-    def __init__(self, process_name, base_offset=0):
-        self.process_name = process_name
+    def __init__(self, pid, base_offset=0):
+        self.pid = pid
         self.process = None
-        self.process_handle = None
         self.base_offset = base_offset
+        self.process_handle = None
 
     def open_process(self):
         self.process = None
 
         # Find the process in the process list
-        while self.process is None:
-            for process in psutil.process_iter(['pid', 'name']):
-                if process.info['name'] == self.process_name:
-                    self.process = process
-                    break
+        for process in psutil.process_iter(['pid', 'name']):
+            if process.info['pid'] == self.pid:
+                self.process = process
+                break
 
-            if self.process is None:
-                print("RPCS3 process not found...")
-                return False
-            else:
-                self.process_handle = OpenProcess(PROCESS_ALL_ACCESS, False, self.process.info['pid'])
-                print(f"RPCS3 process found. Handle: {self.process_handle}")
-
-                return True
+        if self.process is None:
+            print(f"RPCS3 process not found...")
+            return False
+        else:
+            self.process_handle = OpenProcess(PROCESS_ALL_ACCESS, False, self.process.info['pid'])
+            print(f"{self.process.info['name']} process found.")
+            return True
 
     def close_process(self):
         CloseHandle(self.process_handle)
@@ -79,12 +77,12 @@ class Process:
         if not self.write_memory(address, value):
             print("Failed to write memory.")
 
-    def read_int(self, address):
+    def read_int(self, address, signed=False):
         buffer = self.read_memory(address, 4)
 
         value = 0
         if buffer:
-            value = int.from_bytes(buffer, byteorder='big', signed=False)
+            value = int.from_bytes(buffer, byteorder='big', signed=signed)
 
         return value
 
@@ -99,4 +97,16 @@ class Process:
         if buffer:
             # There's no float.from_bytes function
             value = ctypes.c_float.from_buffer_copy(buffer).value
+        return value
+
+    @staticmethod
+    def read_float_from_buffer(buffer, offset):
+        buffer = buffer[offset:offset + 4][::-1]
+        value = ctypes.c_float.from_buffer_copy(buffer).value
+        return value
+
+    @staticmethod
+    def read_int_from_buffer(buffer, offset, signed=False):
+        buffer = buffer[offset:offset + 4]
+        value = int.from_bytes(buffer, byteorder='big', signed=signed)
         return value

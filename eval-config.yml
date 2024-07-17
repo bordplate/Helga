@@ -233,6 +233,6 @@ Miscellaneous:
   Use native user interface: true
   GDB Server: 127.0.0.1:2345
   Silence All Logs: false
-  Window Title Format: "Evaluation Model"
+  Window Title Format: "Evaluation Model - %F"
   Pause Emulation During Home Menu: false
 Log: {}

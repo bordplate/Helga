@@ -79,6 +79,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         self.distance_from_checkpoint_per_step = []
         self.time_since_last_checkpoint = 0
         self.closest_distance_to_checkpoint = 99999
+        self.closest_distance_to_checkpoint_2d = 999999
 
         self.skid_address = 0
         self.jump_debounce = 0
@@ -104,6 +105,11 @@ class FitnessCourseEnvironment(RatchetEnvironment):
             self.game.set_player_position(Vector3(0, 0, -10000))
             self.game.frame_advance(4)
 
+        death_count = self.game.get_death_count()
+        while death_count > 2 and self.game.get_death_count() <= death_count:
+            self.game.set_player_position(Vector3(0, 0, -10000))
+            self.game.frame_advance(4)
+
         # Reset variables that we use to keep track of the episode state and statistics
         self.stalled_timer = 0
         self.distance = 0.0
@@ -117,6 +123,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
 
         self.time_since_last_checkpoint = 0
         self.closest_distance_to_checkpoint = 999999
+        self.closest_distance_to_checkpoint_2d = 999999
 
         # Create checkpoints from self.checkpoint_template and jitter them slightly to make them harder to memorize
         self.checkpoints = []
@@ -135,7 +142,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
 
         # 70% chance to spawn at random checkpoint, 30% in evaluation mode
         if np.random.rand() < (0.7 if not self.eval_mode else 0):
-            checkpoint = np.random.randint(0, 4)
+            checkpoint = np.random.randint(0, 3)
             spawn_position = self.checkpoints_template[checkpoint]
             self.checkpoint = (checkpoint + 1) % len(self.checkpoints)
 
@@ -207,6 +214,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
 
         # Check that agent is moving towards the next checkpoint
         pre_distance_from_checkpoint = pre_player_position.distance_to(checkpoint_position)
+        pre_distance_from_checkpoint_2d = pre_player_position.distance_to_2d(checkpoint_position)
 
         pre_check_delta_x, pre_check_delta_y, pre_check_delta_z = (
             checkpoint_position.x - pre_player_position.x,
@@ -257,6 +265,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         )
 
         distance_from_checkpoint = self.game.get_player_position().distance_to(checkpoint_position)
+        distance_from_checkpoint_2d = pre_player_position.distance_to_2d(checkpoint_position)
 
         # Check that the player is within the bounds of the level
         # if position.x < self.bounds[0][0] or position.y > self.bounds[0][1] or \
@@ -303,6 +312,9 @@ class FitnessCourseEnvironment(RatchetEnvironment):
         if distance_from_checkpoint < self.closest_distance_to_checkpoint:
             self.closest_distance_to_checkpoint = distance_from_checkpoint
 
+        if distance_from_checkpoint_2d < self.closest_distance_to_checkpoint_2d:
+            self.closest_distance_to_checkpoint_2d = distance_from_checkpoint_2d
+
         self.time_since_last_checkpoint += 1
 
         # If agent is within 4 units of checkpoint, go to next checkpoint or loop around
@@ -326,7 +338,7 @@ class FitnessCourseEnvironment(RatchetEnvironment):
 
             self.game.set_checkpoint_position(self.checkpoints[self.checkpoint])
 
-        if distance_from_checkpoint > self.closest_distance_to_checkpoint + 10 and pre_distance_from_checkpoint < distance_from_checkpoint:
+        if distance_from_checkpoint_2d > self.closest_distance_to_checkpoint_2d + 10 and pre_distance_from_checkpoint_2d < distance_from_checkpoint_2d:
             reward += self.reward("moving_away_from_checkpoint_penalty", -0.1)
 
         # Various speed related rewards and penalties

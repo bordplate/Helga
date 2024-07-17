@@ -79,7 +79,7 @@ def start_worker(args):
             Plotter.start_plotting()
 
         # agent.policy.actor.max_log_std = 0.0000001
-        agent.policy.actor.max_log_std = 0.25
+        agent.policy.actor.max_log_std = 0.8
     else:
         agent.policy.actor.max_log_std = 0.8
 
@@ -135,10 +135,11 @@ def start_worker(args):
 
             # Give some run-in time before we start evaluating the model so state observations are normalized properly
             if not eval_mode:
-                # redis.add(state_sequence, actions, reward, last_done, logprob, state_value, agent.policy.actor.hidden_state, agent.policy.actor.cell_state)
+                redis.add(state_sequence, actions, reward, last_done, logprob, state_value, agent.policy.actor.hidden_state, agent.policy.actor.cell_state)
                 redis.add(state_sequence, actions, reward, last_done, logprob, state_value, None, None)
                 pass
             elif eval_mode:
+                redis.add(state_sequence, actions, reward, last_done, logprob, state_value, None, None)
                 # Visualize the actions
                 Visualizer.draw_state_value_face(state_value)
                 Visualizer.draw_score_and_checkpoint(accumulated_reward, env.n_checkpoints)

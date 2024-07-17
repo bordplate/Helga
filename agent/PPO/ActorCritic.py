@@ -81,7 +81,7 @@ class Actor(nn.Module):
         self.max_log_std = max_log_std
         self.feature_count = feature_count
 
-        self.hidden_dims = 1024
+        self.hidden_dims = 2048
         self.hidden_dims_halved = int(self.hidden_dims / 2)
 
         self.num_layers = 1
@@ -89,22 +89,11 @@ class Actor(nn.Module):
 
         # Linear layer to decode the static features of the state
         self.fc0 = nn.Linear(feature_count, self.hidden_dims)
-
-        # Raycasting data is processed by a CNN
-        # self.raycast = RayycastModule((128 + 64*3), self.hidden_dims_halved)
-
-        # self.encoder = nn.Linear(self.hidden_dims, self.hidden_dims)
-        # encoder_layers = nn.TransformerEncoderLayer(d_model=self.hidden_dims, nhead=8, dim_feedforward=1024,
-        #                                             batch_first=True)
-        # self.transformer_encoder = nn.TransformerEncoder(encoder_layers, num_layers=12)
-
-        # self.lstm = nn.LSTM(self.hidden_dims, self.hidden_dims, self.num_layers, batch_first=True)
-
         self.fc1 = nn.Linear(self.hidden_dims, self.hidden_dims)
-        self.fc2 = nn.Linear(self.hidden_dims, self.hidden_dims)
+        self.fc2 = nn.Linear(self.hidden_dims, self.hidden_dims_halved)
         # self.fc3 = nn.Linear(self.hidden_dims, self.hidden_dims)
         # self.fc4 = nn.Linear(self.hidden_dims, self.hidden_dims)
-        self.fc5 = nn.Linear(self.hidden_dims, self.hidden_dims_halved)
+        self.fc5 = nn.Linear(self.hidden_dims_halved, self.hidden_dims_halved)
         self.fc6 = nn.Linear(self.hidden_dims_halved, self.hidden_dims_halved // 2)
 
         self.decoder = nn.Linear(self.hidden_dims_halved // 2, self.action_dim)
@@ -120,10 +109,12 @@ class Actor(nn.Module):
         self._initialize_weights()
 
     def _initialize_weights(self):
-        # Xavier initialization for linear layers
         def init_weights(m):
             if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
+                # Cast to Float32 before applying orthogonal initialization
+                weight = m.weight.data.to(torch.float32)
+                nn.init.orthogonal_(weight)
+                m.weight.data = weight.to(m.weight.dtype)  # Convert back to original dtype
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
 
@@ -212,30 +203,19 @@ class Critic(nn.Module):
         self.action_dim = action_dim
         self.feature_count = feature_count
 
-        self.hidden_dims = 1024
+        self.hidden_dims = 2048
         self.hidden_dims_halved = int(self.hidden_dims / 2)
 
         # Linear layer to decode the static features of the state
         self.fc0 = nn.Linear(feature_count, self.hidden_dims)
-
-        # Raycasting data is processed by a separate sequence of linear layers
-        # self.raycast = RayycastModule()
-
-        # self.lstm = nn.LSTM(self.hidden_dims, self.hidden_dims, 1, batch_first=True)
-
         self.fc1 = nn.Linear(self.hidden_dims, self.hidden_dims)
-        self.fc2 = nn.Linear(self.hidden_dims, self.hidden_dims)
+        self.fc2 = nn.Linear(self.hidden_dims, self.hidden_dims_halved)
         # self.fc3 = nn.Linear(self.hidden_dims, self.hidden_dims)
         # self.fc4 = nn.Linear(self.hidden_dims, self.hidden_dims)
-        self.fc5 = nn.Linear(self.hidden_dims, self.hidden_dims_halved)
-        self.fc6 = nn.Linear(self.hidden_dims_halved, self.hidden_dims_halved)
+        self.fc5 = nn.Linear(self.hidden_dims_halved, self.hidden_dims_halved)
+        self.fc6 = nn.Linear(self.hidden_dims_halved, self.hidden_dims_halved // 2)
 
-        # self.encoder = nn.Linear(self.hidden_dims, self.hidden_dims)
-        # encoder_layers = nn.TransformerEncoderLayer(d_model=self.hidden_dims, nhead=8, dim_feedforward=512,
-        #                                             batch_first=True)
-        # self.transformer_encoder = nn.TransformerEncoder(encoder_layers, num_layers=12)
-
-        self.decoder = nn.Linear(self.hidden_dims_halved, 1)
+        self.decoder = nn.Linear(self.hidden_dims_halved // 2, self.action_dim)
 
         self.to(device=self.device)
         self.to(dtype=torch.bfloat16)
@@ -244,10 +224,12 @@ class Critic(nn.Module):
         self._initialize_weights()
 
     def _initialize_weights(self):
-        # Xavier initialization for linear layers
         def init_weights(m):
             if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
+                # Cast to Float32 before applying orthogonal initialization
+                weight = m.weight.data.to(torch.float32)
+                nn.init.orthogonal_(weight)
+                m.weight.data = weight.to(m.weight.dtype)  # Convert back to original dtype
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
 
