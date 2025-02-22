@@ -5,6 +5,9 @@ Helga is a reinforcement learning gym environment for the original Ratchet & Cla
 - Ratchet & Clank 1 (PAL) - NPEA00385
 - Ratchet & Clank 3: Up Your Arsenal (PAL) - NPEA00387
 
+## Demo
+https://github.com/user-attachments/assets/51152cbd-16f6-48d1-8908-72ef7b375eb2
+
 ## Requirements
 - Windows
 - RPCS3
