@@ -4,6 +4,7 @@
 #include "bridging.h"
 
 #include <sysutil/sysutil_gamecontent.h>
+#include "Moby.h"
 
 #include <cell/cell_fs.h>
 #include <cell/pad.h>
@@ -80,52 +81,86 @@ int cellGameContentPermitHook(char* contentInfoPath, char* usrdirPath) {
     return 0;
 }
 
+SHK_HOOK(void, STUB_008acc94);
+void game_start() {
+    _c_on_game_start();
+}
+
 SHK_HOOK(void, pre_game_loop, void);
 void pre_game_loop_hook() {
     _c_game_tick();
 }
 
-#define headless *((int*)0x1B00200)
+SHK_HOOK(void, update_mobys_func);
+void update_mobys_func_hook() {
+    SHK_CALL_HOOK(update_mobys_func);
 
-SHK_HOOK(void, render, int);
-void render_hook(int a1) {
-    if (headless == 0) {
-        SHK_CALL_HOOK(render, 0);
-    }
+    _c_game_tick();
 }
 
-#define remote_pressed_buttons *((int*)0x1B00008)
-#define last_remote_pressed_buttons *((int*)0x1B0000C)
+SHK_HOOK(Moby*, spawn_moby, int, int);
+Moby* spawn_moby_hook(int o_class, int unk2) {
+    SHK_CALL_HOOK(spawn_moby, o_class, unk2);
+}
+
+#define last_state *((int*)0xcc518c)
+
+#define blue_flag_position *((Vec3*)0xcc5190)
+
+SHK_HOOK(void, ctf_flag_update_func, Moby*);
+void ctf_flag_update_func_hook(Moby* moby) {
+    SHK_CALL_HOOK(ctf_flag_update_func, moby);
+
+    _c_on_flag_update(moby);
+}
+
+//#define headless *((int*)0xcc5200)
+
+SHK_HOOK(void, render, int, char*);
+void render_hook(int a1, char* pass) {
+//    return;
+//    if (strcmp(pass, "Shrub") == 0 ||
+//        strcmp(pass, "Frame") == 0) {
+//        MULTI_LOG("Ignoring %s\n", pass);
+//        return;
+//    }
+
+    SHK_CALL_HOOK(render, a1, pass);
+}
+
+#define remote_pressed_buttons *((int*)0xcc5200)
+#define remote_joysticks *((int*)0xcc5204)
 
 SHK_HOOK(int32_t, cellPadGetDataRedirect, uint32_t, CellPadData*);
 int32_t cellPadGetDataRedirectHook(uint32_t port_no, CellPadData *data) {
     int32_t ret = cellPadGetData(port_no, data);
 
-    int32_t len = data->len;
+    if (port_no == 2) {
+        int32_t len = data->len;
 
-    memset(data, 0, 16);
+        memset(data, 0, 16);
 
-    data->len = len;
+        data->len = len;
 
 //    if (data->len != 0) {
 //        MULTI_LOG("Port_no: %d; Data len: %d. inputs: %.4x. Ret: %d\n", port_no, data->len,
 //                  (data->button[2] << 8) + data->button[3], ret);
 //    }
 
-    if (current_level > 0) {
-        if (data->len == 0 && (remote_pressed_buttons != last_remote_pressed_buttons)) {
-            data->len = 24;
+        if (current_level != 0) {
+//            if (data->len == 0 && (remote_pressed_buttons != last_remote_pressed_buttons)) {
+            if (data->len == 0) {
+                data->len = 24;
+            }
+
+            data->button[2] |= ((remote_pressed_buttons + 0x8 * port_no) & 0xff00) >> 8;
+            data->button[3] |= (remote_pressed_buttons + 0x8 * port_no) & 0x00ff;
+            data->button[4] = ((remote_joysticks + 0x8 * port_no) & 0x000000ff);
+            data->button[5] = ((remote_joysticks + 0x8 * port_no) & 0x0000ff00) >> 8;
+            data->button[6] = ((remote_joysticks + 0x8 * port_no) & 0x00ff0000) >> 16;
+            data->button[7] = ((remote_joysticks + 0x8 * port_no) & 0xff000000) >> 24;
         }
-
-        data->button[2] |= (remote_pressed_buttons & 0xff00) >> 8;
-        data->button[3] |= remote_pressed_buttons & 0x00ff;
-        data->button[4] = 0x7f;
-        data->button[5] = 0x7f;
-        data->button[6] = 0x7f;
-        data->button[7] = 0x7f;
     }
-
-    last_remote_pressed_buttons = remote_pressed_buttons;
 
     return ret;
 }
@@ -138,8 +173,14 @@ void rc3_init() {
     SHK_BIND_HOOK(cellGameBootCheck, cellGameBootCheckHook);
     SHK_BIND_HOOK(cellGameContentPermit, cellGameContentPermitHook);
 
+    SHK_BIND_HOOK(STUB_008acc94, game_start);
+
+    SHK_BIND_HOOK(update_mobys_func, update_mobys_func_hook);
     SHK_BIND_HOOK(pre_game_loop, pre_game_loop_hook);
     SHK_BIND_HOOK(render, render_hook);
+
+    SHK_BIND_HOOK(spawn_moby, spawn_moby_hook);
+    SHK_BIND_HOOK(ctf_flag_update_func, ctf_flag_update_func_hook);
 
     SHK_BIND_HOOK(cellPadGetDataRedirect, cellPadGetDataRedirectHook);
 

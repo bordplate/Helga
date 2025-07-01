@@ -25,9 +25,12 @@ typedef double f64;
 
 // ghidra types
 typedef u8 undefined;
+typedef u8 undefined1;
 typedef u16 undefined2;
 typedef u32 undefined4;
 typedef u64 undefined8;
+
+typedef unsigned char    byte;
 
 typedef struct Vec4 {
     float x;

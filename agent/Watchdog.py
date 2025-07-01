@@ -6,10 +6,6 @@ import subprocess
 
 from Game.RC1Game import RC1Game
 
-# Define the prctl function from the C library
-libc = ctypes.CDLL('libc.so.6')
-PR_SET_NAME = 15
-
 
 class Watchdog:
     """
@@ -29,9 +25,9 @@ class Watchdog:
     def start(self, force=False):
         # If we're running in PyCharm debug mode, don't start the watchdog, unless --force-watchdog is passed
         import sys
-        if "pydevd" in sys.modules and "--force-watchdog" not in sys.argv:
-            print("Watchdog: Not starting watchdog because we're running in PyCharm debug mode.")
-            return
+        # if "pydevd" in sys.modules and "--force-watchdog" not in sys.argv:
+        #     print("Watchdog: Not starting watchdog because we're running in PyCharm debug mode.")
+        #     return
 
         print("Starting RPCS3...")
         import subprocess
@@ -48,7 +44,8 @@ class Watchdog:
         if os.name == "posix":
             process = subprocess.Popen([
                     rf"/bin/bash", "-c",
-                    f"exec -a {process_name} /usr/bin/rpcs3 --no-gui --config {config_file} {self.game_path}",
+                    f"exec -a {process_name} /Applications/RPCS3.app/Contents/MacOS/rpcs3 --no-gui --config {config_file} {self.game_path}",
+                    # f"exec -a {process_name} /usr/bin/rpcs3 --no-gui --config {config_file} {self.game_path}",
                 ],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
@@ -74,7 +71,7 @@ class Watchdog:
 
         # Change the name of the running process so we can distinguish it from
 
-        time.sleep(1)
+        time.sleep(10)
 
         # thread = threading.Thread(target=self.run, args=())
         # thread.daemon = True

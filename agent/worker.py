@@ -110,14 +110,14 @@ def start_worker(args):
         agent.action_mask = redis.get_action_mask()
 
         while True:
-            while redis.check_buffer_full():
-                must_check_new_model = True
-                time.sleep(0.1)
-
-            if steps % 5 == 0 or must_check_new_model:
-                new_model = redis.get_new_model()
-                if new_model is not None:
-                    agent.load_policy_dict(new_model)
+            # while redis.check_buffer_full():
+            #     must_check_new_model = True
+            #     time.sleep(0.1)
+            #
+            # if steps % 5 == 0 or must_check_new_model:
+            #     new_model = redis.get_new_model()
+            #     if new_model is not None:
+            #         agent.load_policy_dict(new_model)
 
             # old_hidden_state = agent.policy.actor.hidden_state.clone().detach()
             # old_cell_state = agent.policy.actor.cell_state.clone().detach()
@@ -135,11 +135,11 @@ def start_worker(args):
 
             # Give some run-in time before we start evaluating the model so state observations are normalized properly
             if not eval_mode:
-                redis.add(state_sequence, actions, reward, last_done, logprob, state_value, agent.policy.actor.hidden_state, agent.policy.actor.cell_state)
-                redis.add(state_sequence, actions, reward, last_done, logprob, state_value, None, None)
+                # redis.add(state_sequence, actions, reward, last_done, logprob, state_value, agent.policy.actor.hidden_state, agent.policy.actor.cell_state)
+                # redis.add(state_sequence, actions, reward, last_done, logprob, state_value, None, None)
                 pass
             elif eval_mode:
-                redis.add(state_sequence, actions, reward, last_done, logprob, state_value, None, None)
+                # redis.add(state_sequence, actions, reward, last_done, logprob, state_value, None, None)
                 # Visualize the actions
                 Visualizer.draw_state_value_face(state_value)
                 Visualizer.draw_score_and_checkpoint(accumulated_reward, env.n_checkpoints)
