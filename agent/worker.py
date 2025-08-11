@@ -2,7 +2,10 @@ import time
 
 import torch
 
+from Environments.EudoraEnvironment import EudoraEnvironment
+from Environments.KerwanEnvironment import KerwanEnvironment
 from RunningStats import RunningStats
+from VectorizedStats import VecNormalize
 from Watchdog import Watchdog
 from Environments.FitnessCourseEnvironment import FitnessCourseEnvironment
 from Environments.GasparEnvironment import GasparEnvironment
@@ -13,7 +16,7 @@ from PPO.PPOAgent import PPOAgent
 
 from RedisHub import RedisHub
 
-features = 28 + 256*5
+features = 29 + 256*5
 sequence_length = 1
 
 configuration = {
@@ -37,10 +40,14 @@ def start_worker(args):
     project_key = args.project_key
     device = "cpu" if args.cpu_only else device
 
+    best_checkpoint = 0
+
+    watchdog = None
+
     # If we're not being debugged in PyCharm mode, we start a new RPCS3 process using the watchdog, otherwise we connect to an existing one
     pid = 0
     import sys
-    if not "pydevd" in sys.modules:
+    if True or not "pydevd" in sys.modules:
         # Make new environment and watchdog
         watchdog = Watchdog(render=eval_mode)
         if not watchdog.start(force=True):
@@ -56,21 +63,25 @@ def start_worker(args):
                 pid = proc.pid
                 break
 
-    env = FitnessCourseEnvironment(pid=pid, eval_mode=eval_mode, device=device)
+    env = KerwanEnvironment(pid=pid, eval_mode=eval_mode, device=device)
 
     # Watchdog starts RPCS3 and the game for us if it's not already running
     env.start()
 
+    if not watchdog is None:
+        watchdog.watch(env)
+
     # Connect to Redis
     redis = RedisHub(f"redis://{args.redis_host}:{args.redis_port}", f"{project_key}.rollout_buffer", device=device)
 
-    # state_running_stats = RunningStats()
+    state_running_stats = VecNormalize(shape=(sequence_length, features), device=device)
 
     # Agent that we will use only for inference, learning related parameters are not used
     agent = PPOAgent(features, 7, log_std=-0.5, device=device)
 
     if eval_mode:
-        pass
+        best_checkpoint = 0
+
         # Draws a visualization of the actions and other information
         import Visualizer
 
@@ -87,6 +98,8 @@ def start_worker(args):
     episodes = 0
     scores = []
 
+    all_zeros = torch.zeros((features), dtype=torch.bfloat16).to(device)
+
     # Start stepping through the environment
     while True:
         torch.cuda.empty_cache()
@@ -95,11 +108,11 @@ def start_worker(args):
         state, _, _ = env.reset()
 
         # state_running_stats.update(state)
-        # state = state_running_stats.normalize(state)
+        state = state_running_stats.normalize_observation(state)
 
         state_sequence = torch.zeros((sequence_length, features), dtype=torch.bfloat16).to(device)
         state_sequence[-1] = state
-    
+
         accumulated_reward = 0
         steps = 0
 
@@ -108,6 +121,8 @@ def start_worker(args):
         must_check_new_model = False
 
         agent.action_mask = redis.get_action_mask()
+
+        start_time = time.time()
 
         while True:
             while redis.check_buffer_full():
@@ -119,6 +134,8 @@ def start_worker(args):
                 if new_model is not None:
                     agent.load_policy_dict(new_model)
 
+
+
             # old_hidden_state = agent.policy.actor.hidden_state.clone().detach()
             # old_cell_state = agent.policy.actor.cell_state.clone().detach()
 
@@ -127,22 +144,24 @@ def start_worker(args):
             actions = actions.to(dtype=torch.float32).squeeze().cpu()
 
             new_state, reward, done = env.step(actions)
+            #new_state, reward, done = all_zeros, 0, False
 
             # state_running_stats.update(new_state)
-            # new_state = state_running_stats.normalize(new_state)
+            new_state = state_running_stats.normalize_observation(new_state)
+            ##reward = state_running_stats.normalize_reward(reward).item()
 
-            time_left = (30 * 30 - env.time_since_last_checkpoint) / 30
+            time_left = env.remaining_frames / 30
+
+            redis.add(state_sequence, actions, reward, last_done, logprob, state_value, None, None)
+
+            if env.n_checkpoints > best_checkpoint:
+                best_checkpoint = env.n_checkpoints
 
             # Give some run-in time before we start evaluating the model so state observations are normalized properly
-            if not eval_mode:
-                redis.add(state_sequence, actions, reward, last_done, logprob, state_value, agent.policy.actor.hidden_state, agent.policy.actor.cell_state)
-                redis.add(state_sequence, actions, reward, last_done, logprob, state_value, None, None)
-                pass
-            elif eval_mode:
-                redis.add(state_sequence, actions, reward, last_done, logprob, state_value, None, None)
+            if eval_mode:
                 # Visualize the actions
                 Visualizer.draw_state_value_face(state_value)
-                Visualizer.draw_score_and_checkpoint(accumulated_reward, env.n_checkpoints)
+                Visualizer.draw_score_and_checkpoint(accumulated_reward, env.n_checkpoints, best_checkpoint)
                 Visualizer.render_raycast_data(np.float16(env.game.get_collisions(normalized=False)))
                 Visualizer.draw_bars(actions, state_value, time_left/30)
 
@@ -161,14 +180,17 @@ def start_worker(args):
             total_steps += 1
 
             if eval_mode or steps % 5 == 0:
-                print(f"Score: %6.2f    death: %05.2f checkpoint: %d  closest_dist: %02.2f  value: %3.2f  highest_z: %3.2f  from_ground: %3.2f         " % (
+                steps_per_second = steps / (time.time() - start_time)
+
+                print(f"Score: %6.2f    death: %05.2f checkpoint: %d  dist: %02.2f  value: %3.2f  sps: %3.2f  from_ground: %3.2f best: %d         " % (
                     accumulated_reward,
                     time_left,
-                    env.n_checkpoints,
-                    env.closest_distance_to_checkpoint,
+                    0,
+                    env.distance_from_spawn,
                     state_value.item() if state_value is not None else 0.0,
-                    env.highest_grounded_z,
-                    env.distance_from_ground
+                    steps_per_second,
+                    env.distance_from_ground,
+                    best_checkpoint
                 ), end="\r")
 
             if done:
@@ -190,6 +212,7 @@ def start_worker(args):
 
 if __name__ == "__main__":
     # Catch Ctrl+C and exit gracefully
+    args = None
     try:
         import argparse
 
@@ -202,7 +225,7 @@ if __name__ == "__main__":
         parser.add_argument("--render", action="store_true", default=True)
         parser.add_argument("--force-watchdog", action="store_false")
         parser.add_argument("--eval", type=bool, action=argparse.BooleanOptionalAction, default=False)
-        parser.add_argument("--project-key", type=str, default="rac1.fitness-course")
+        parser.add_argument("--project-key", type=str, default="rac1.kerwan")
         parser.add_argument("--cpu-only", action="store_true", default=False)
 
         args = parser.parse_args()
@@ -212,3 +235,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("Exiting...")
         exit(0)
+    except ValueError:
+        start_worker(args)
+    # except OSError:
+    #     start_worker(args)

@@ -38,16 +38,18 @@ bigger_font = pygame.font.Font("/usr/share/fonts/TTF/Hack-Bold.ttf", 36)
 state_values = deque(maxlen=400)
 
 
-def draw_score_and_checkpoint(score, checkpoint):
+def draw_score_and_checkpoint(score, checkpoint, best=0):
     """
     Draw the score and checkpoint on the screen.
     """
 
     score_label = bigger_font.render(f"Score: %.2f" % score, True, (255, 255, 255))
     checkpoint_label = bigger_font.render(f"Checkpoint: {checkpoint}", True, (255, 255, 255))
+    best_label = bigger_font.render(f"Best: {best}", True, (255, 255, 255))
 
     screen.blit(score_label, (420, 500))
     screen.blit(checkpoint_label, (420, 540))
+    screen.blit(best_label, (420, 580))
 
 
 def draw_state_value_face(state_value):
