@@ -5,8 +5,12 @@ import numpy as np
 
 if os.name == 'nt':
     from Game.WindowsProcess import Process
-elif os.name == 'posix':
-    from Game.LinuxProcess import Process
+else:
+    # Check if Mac
+    if os.uname().sysname == 'Darwin':
+        from agent.Game.PINEProcess import Process
+    else:
+        from Game.LinuxProcess import Process
 
 
 # Vector3

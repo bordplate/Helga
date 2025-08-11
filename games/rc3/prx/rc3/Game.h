@@ -20,6 +20,8 @@ public:
 
     void transition_to(View* view);
 
+    void flag_update(Moby* flag_moby);
+    void on_game_start();
     void on_tick();
     void on_render();
 

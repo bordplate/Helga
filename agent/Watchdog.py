@@ -9,6 +9,10 @@ import psutil
 
 from Game.RC1Game import RC1Game
 
+# Define the prctl function from the C library
+libc = ctypes.CDLL('libc.so.6')
+PR_SET_NAME = 15
+
 
 class Watchdog:
     """
@@ -31,7 +35,7 @@ class Watchdog:
     def start(self, force=False):
         # If we're running in PyCharm debug mode, don't start the watchdog, unless --force-watchdog is passed
         import sys
-        if False and "pydevd" in sys.modules and "--force-watchdog" not in sys.argv:
+        if "pydevd" in sys.modules and "--force-watchdog" not in sys.argv:
             print("Watchdog: Not starting watchdog because we're running in PyCharm debug mode.")
             return
 

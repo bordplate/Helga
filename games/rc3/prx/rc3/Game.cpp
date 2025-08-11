@@ -15,14 +15,39 @@
 
 #include "PersistentStorage.h"
 
-#define custom_frame_count *((int*)0x1B00000)
-#define progress_frame_count *((int*)0x1B00004)
+#define custom_frame_count *((int*)0xcc5180)
+#define progress_frame_count *((int*)0xcc5184)
 
-#define collision_info ((float*)0x1B00010)
-#define collision_info_types ((int*)0x1B00014)
+struct RaycastInfo {
+    float distances[64];
+    int classes[64];
+    float normals_x[64];
+    float normals_y[64];
+    float normals_z[64];
+};
+
+struct PlayerInfo {
+    Vec3 position;
+    Vec3 rotation;
+    float health;
+    int team_id;
+};
+
+struct TeamInfo {
+    Vec3 flag_position;
+    int flag_state;
+    float team_health;
+    int flag_holder;
+    int score;
+};
+
+#define BASE_ADDRESS 0xcd0000
+
+//#define raycast_info ((struct RaycastInfo*)(BASE_ADDRESS + (0x100 * 4 * 0)))
+#define PLAYER_INFO ((struct PlayerInfo*)(BASE_ADDRESS + (0x100 * 4 * 0)))
+#define TEAM_INFO ((struct TeamInfo*)(0xce0000))
 
 Moby *test_moby[8];
-
 float sqrt_ppc(float number) {
     float result;
     asm("fsqrts %0, %1" : "=f"(result) : "f"(number));
@@ -85,46 +110,161 @@ void Game::start() {
 
 }
 
+void Game::on_game_start() {
+    // Loads into multiplayer
+    destination_level = 0x27;
+    load_level = 1;
+}
+
+void Game::flag_update(Moby* flag_moby) {
+    int team_id = flag_moby->o_class == 7217 ? 0 : 1;
+
+    TeamInfo* team_info = &TEAM_INFO[team_id];
+
+    team_info->flag_holder = *((int*)((u32)flag_moby->pVars + 0x10));
+    team_info->flag_state = flag_moby->state;
+
+    team_info->flag_position.x = flag_moby->pos.x;
+    team_info->flag_position.y = flag_moby->pos.y;
+    team_info->flag_position.z = flag_moby->pos.z;
+}
+
 void Game::on_tick() {
     if (current_level < 30) {
         return;
     }
 
-    // Get forward and up vector
-    Vec4 forward = hero_moby->forward;
-    Vec4 up = hero_moby->up;
-    Vec4 position = hero_moby->position;
-    position.z += 2.0f;
+    if (current_level != 46) {
+        multiplayer_level = 6;
+        is_local_multiplayer = 1;
+        num_local_players = 4;
 
-    // Make 8 rays around the player in a circle with a radius of 10, without using rotate function
-    Vec4 rays[16];
-    for (int i = 0; i < 16; i++) {
-        float angle = (i / 16.0f) * 2 * M_PI;
-        rays[i] = Vec4((float)(position.x + 50 * cos_approx(angle)), (float)position.y, (float)(position.z + 50 * sin_approx(angle)), 0.0f);
+        nwSetGameSetupFlagsForGameType(1);
 
-        // Get collision info for the ray
-        int collision = coll_line(&hero_moby->position, &rays[i], 0x0, hero_moby, nullptr);
+        nwConnect(nullptr);
+        nwJoin();
 
-        float dist = -10.0f;
+        player1_controller_ptr = (void*)0xd992c0;
+        player2_controller_ptr = (void*)0xd99824;
+        player3_controller_ptr = (void*)0xd99d88;
+        player4_controller_ptr = (void*)0xd9a2ec;
 
-        if (collision > 0) {
-            // Get distance
-            dist = distance(position, coll_output.ip);
-        } else {
-            dist = -10.0f;
-        }
+        game_settings->gameType = 1;
+        game_settings->altGameType = 0;
+        game_settings->level = 46;
+        game_settings->unk2 = 4;
+        game_settings->numPlayers = 4;
+        game_settings->ctfCap = 255;
+        game_settings->showPlayerNames = true;
+        game_settings->startWithChargeboots = true;
+        game_settings->shizzolate = true;
 
-        collision_info[i*2] = dist;
-        if (coll_output.pMoby != nullptr) {
-            collision_info_types[i * 2] = (int)coll_output.pMoby->o_class;
-        } else {
-            collision_info_types[i * 2] = 0;
-        }
+        game_settings->playerTeams[0] = 0;
+        game_settings->playerTeams[1] = 0;
+        game_settings->playerTeams[2] = 1;
+        game_settings->playerTeams[3] = 1;
+
+        sprintf((char*)&game_settings->playerNames[0], "Ben");
+        sprintf((char*)&game_settings->playerNames[1], "Jen");
+        sprintf((char*)&game_settings->playerNames[2], "Ken");
+        sprintf((char*)&game_settings->playerNames[3], "Len");
+
+        destination_level = 46;
+        load_level = 1;
+        lobby_mode = 2;
+        return;
     }
 
-    custom_frame_count += 1;
+    TEAM_INFO[0].team_health = 0;
+    TEAM_INFO[1].team_health = 0;
 
-    while (progress_frame_count != custom_frame_count) {}
+    TEAM_INFO[0].score = (*(int**)(0x13dd374))[2];
+    TEAM_INFO[1].score = (*(int**)(0x13dd374))[3];
+
+    for (int player_id = 0; player_id < num_local_players; player_id++) {
+        Moby* moby = team_data[player_id].player_moby;
+        PlayerInfo* player_info = &PLAYER_INFO[player_id];
+
+        player_info->position.x = moby->pos.x;
+        player_info->position.y = moby->pos.y;
+        player_info->position.z = moby->pos.z;
+
+        player_info->rotation.x = moby->rot.x;
+        player_info->rotation.y = moby->rot.y;
+        player_info->rotation.z = moby->rot.z;
+
+        player_info->health = team_data[player_id].health;
+        player_info->team_id = team_data[player_id].team_id;
+
+        TEAM_INFO[player_info->team_id].team_health += player_info->health;
+
+//        // Raycast in a grid pattern extending from the player with the given fov
+//        // We also oscillate the rays to the left and right to get a wider field of view
+//        Vec4 forward = moby->forward;
+//        forward.x = moby->forward.z;
+//        forward.y = moby->right.z;
+//        forward.z = moby->up.z;
+//        forward.w = 1;
+//
+//        Vec4 left = Vec4();
+//        left.x = moby->forward.x;
+//        left.y = moby->right.x;
+//        left.z = moby->up.x;
+//        left.w = 1;
+//
+//        Vec4 up = moby->up;
+//        up.x = moby->forward.y;
+//        up.y = moby->right.y;
+//        up.z = moby->up.y;
+//
+//        float ray_distance = 64.0f;
+//        float ray_wide = 90.0f;
+//
+//        float fov = 64.0f;
+//        int rows = 8;
+//        int cols = 8;
+//
+//        // Store camera collision and set it to null
+//        unsigned short *collision;
+//        RaycastInfo* info = &raycast_info[playerId];
+//        for (int i = 0; i < rows; i++) {
+//            for (int j = 0; j < cols; j++) {
+//                Vec4 ray = Vec4();
+//                ray.x = moby->pos.x + ray_distance * forward.x + (ray_wide * (j - cols/2) / cols) * left.x + (ray_wide * (i - rows/2) / rows) * up.x;
+//                ray.y = moby->pos.y + ray_distance * forward.y + (ray_wide * (j - cols/2) / cols) * left.y + (ray_wide * (i - rows/2) / rows) * up.y;
+//                ray.z = moby->pos.z + ray_distance * forward.z + (ray_wide * (j - cols/2) / cols) * left.z + (ray_wide * (i - rows/2) / rows) * up.z;
+//                ray.w = moby->pos.w;
+//
+//                Vec4 ray_start = moby->pos;
+//
+//                int coll = coll_line(&moby->pos, &ray, 0, nullptr, nullptr);
+//
+////                Moby* test_moby = nullptr;
+////
+////                //if (should_render) {
+////                //    test_moby = (Moby *)collisions_mobys[i * cols + j];
+////                //}
+//
+//                if (coll) {
+//                    info->distances[i * cols + j] = distance(moby->pos, coll_output.ip);
+//                    info->classes[i * cols + j] = -2 - (int)(coll_output.poly & 0x1fU);
+//                    info->normals_z[i * cols + j] = coll_output.normal.x;
+//                    info->normals_y[i * cols + j] = coll_output.normal.y;
+//                    info->normals_z[i * cols + j] = coll_output.normal.z;
+//
+//                    if (coll_output.pMoby) {
+//                        info->classes[i * cols + j] = coll_output.pMoby->o_class;
+//                    }
+//                } else {
+//                    info->distances[i * cols + j] = -32.0f;
+//                    info->classes[i * cols + j] = -128;
+//                }
+//            }
+//        }
+    }
+
+//    while (progress_frame_count < custom_frame_count && current_level != 0) {}
+    custom_frame_count += 1;
 }
 
 void Game::before_player_spawn() {
@@ -171,4 +311,12 @@ extern "C" void _c_game_quit() {
 
 extern "C" void _c_on_respawn() {
     Game::shared().before_player_spawn();
+}
+
+extern "C" void _c_on_game_start() {
+    Game::shared().on_game_start();
+}
+
+extern "C" void _c_on_flag_update(Moby* flag_moby) {
+    Game::shared().flag_update(flag_moby);
 }

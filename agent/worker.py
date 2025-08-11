@@ -47,7 +47,7 @@ def start_worker(args):
     # If we're not being debugged in PyCharm mode, we start a new RPCS3 process using the watchdog, otherwise we connect to an existing one
     pid = 0
     import sys
-    if True or not "pydevd" in sys.modules:
+    if not "pydevd" in sys.modules:
         # Make new environment and watchdog
         watchdog = Watchdog(render=eval_mode)
         if not watchdog.start(force=True):
@@ -134,8 +134,6 @@ def start_worker(args):
                 if new_model is not None:
                     agent.load_policy_dict(new_model)
 
-
-
             # old_hidden_state = agent.policy.actor.hidden_state.clone().detach()
             # old_cell_state = agent.policy.actor.cell_state.clone().detach()
 
@@ -144,7 +142,6 @@ def start_worker(args):
             actions = actions.to(dtype=torch.float32).squeeze().cpu()
 
             new_state, reward, done = env.step(actions)
-            #new_state, reward, done = all_zeros, 0, False
 
             # state_running_stats.update(new_state)
             new_state = state_running_stats.normalize_observation(new_state)

@@ -33,7 +33,9 @@ screen = pygame.display.set_mode((screen_width, screen_height))
 pygame.display.set_caption("Action Visualization")
 
 font = pygame.font.Font(None, 24)
-bigger_font = pygame.font.Font("/usr/share/fonts/TTF/Hack-Bold.ttf", 36)
+bigger_font = pygame.font.Font(None, 36)
+# bigger_font = pygame.font.Font("/usr/share/fonts/TTF/Hack-Bold.ttf", 36)
+
 
 state_values = deque(maxlen=400)
 

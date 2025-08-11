@@ -7,6 +7,29 @@ PPU-ca24b3c7b5db4bf8e8b9699fc1cbca8341855556:
     Notes: 
     Patch Version: 1.0
     Patch:
+#      0x96e3c8: 0x60000000
+#      0x989b60: 0x4e800020
+#      0x9a11c8: 0x60000000
+#      0xa6155c: 0x4e800020
+#      0xaab028: 0x60000000
+#      0x268a30: 0x60000000
+#      0x1ba448: 0x60000000
+#      0x997f38: 0x4e800020
+#      0xaa912c: 0x4e800020
+#      0x2320ac: 0x4e800020
+#      0x2321c8: 0x4e800020
+#      0x2322b8: 0x4e800020
+#      0x26a2b8: 0x4e800020
+#      0x997b9c: 0x4e800020
+#      0x96e268: 0x60000000
+#      0xaaa854: 0x60000000
+#      0xad0dec: 0x4e800020
+#      0x973c88: 0x4e800020
+
+
+
+        # 0x97ca18: 0x489432d3
+# 0xa6155c: 0x4e800020
       - [ be32, 0xAEFED4, 0x9f18429d ] # replace _sys_process_at_Exitspawn with sys_prx_start_module
 #      -
 #      # Replace call to cellGameBootCheck

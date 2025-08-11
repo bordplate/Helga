@@ -2,18 +2,38 @@ import ctypes
 
 import numpy as np
 
-from .WindowsProcess import Process
+# from .WindowsProcess import Process
 from .Game import Game, Vector3
 
 
 class RC3Game(Game):
     offset = 0x300000000
 
-    frame_count_address = 0x1B00000
-    frame_progress_address = 0x1B00004
-    input_address = 0x1B00008
+    frame_count_address = 0xcc5180
+    frame_progress_address = 0xcc5184
+    input_address = 0xcc5200
+    joystick_address = 0xcc5204
 
-    collision_info_address = 0x1B00010
+    player_position_address = 0xcd0000
+    player_rotation_address = 0xcd000c
+    player_health_address = 0xcd0018
+    player_team_id_address = 0xcd001c
+
+    player_info_size = 0x20
+
+    team_flag_position_address = 0xce0000
+    team_flag_state_address = 0xce000c
+    team_health_address = 0xce0010
+    team_flag_holder_address = 0xce0014
+    team_score_address = 0xce0018
+
+    team_info_size = 0x1c
+
+    collisions_address = 0xcd0000 + ((256 * 4) * 0)
+    collisions_class_address = 0xcd0000 + ((256 * 4) * 1)
+    collisions_normals_x = 0xcd0000 + ((256 * 4) * 2)
+    collisions_normals_y = 0xcd0000 + ((256 * 4) * 3)
+    collisions_normals_z = 0xcd0000 + ((256 * 4) * 4)
 
     headless_address = 0x1B00200
 
@@ -32,10 +52,27 @@ class RC3Game(Game):
 
     vidcomic_state_address = 0xda5122
 
-    def __init__(self, process_name="rpcs3.exe"):
+    def __init__(self, player=0, process_name="rpcs3.exe"):
         super().__init__(process_name)
 
+        self.player = player
         self.game_key = "rc3"
+
+        self.team = -1
+
+    def get_team(self):
+        """Get the team of the player."""
+        if self.team == -1:
+            # Read the team from the game state
+            self.team = self.process.read_int(self.player_team_id_address + self.player_info_size * self.player)
+
+        return self.team
+
+    def get_health(self):
+        return self.process.read_float(self.player_health_address + self.player_info_size * self.player)
+
+    def get_team_health(self, team_id):
+        return self.process.read_float(self.team_health_address + self.team_info_size * team_id)
 
     def get_hero_position(self) -> Vector3:
         """Player position is stored in big endian, so we need to convert it to little endian."""
@@ -53,6 +90,54 @@ class RC3Game(Game):
         ctypes.memmove(ctypes.byref(hero_position), hero_position_buffer, ctypes.sizeof(hero_position))
 
         return hero_position
+
+    def team_has_flag(self, team_id) -> bool:
+        team = 1 if team_id == 0 else 0
+        return self.get_flag_holder(team) != -1
+
+    def get_flag_holder(self, team_id) -> int:
+        return self.process.read_int(self.team_flag_holder_address + self.team_info_size * team_id)
+
+    def get_player_position(self) -> Vector3:
+        """Player position is stored in big endian, so we need to convert it to little endian."""
+        player_position_buffer = self.process.read_memory(self.player_position_address + self.player_info_size * self.player, 12)
+
+        if player_position_buffer is None:
+            return Vector3()
+
+        player_position_buffer = (
+            player_position_buffer[3::-1] +
+            player_position_buffer[7:3:-1] +
+            player_position_buffer[11:7:-1]
+        )
+
+        player_position = Vector3()
+        ctypes.memmove(ctypes.byref(player_position), player_position_buffer, ctypes.sizeof(player_position))
+
+        return player_position
+
+    def get_team_score(self, team_id: int) -> int:
+        """Get the score of the team."""
+        return self.process.read_int(self.team_score_address + self.team_info_size * team_id)
+
+    def get_player_rotation(self) -> Vector3:
+        """Player rotation is stored in big endian, so we need to convert it to little endian."""
+        player_rotation_buffer = self.process.read_memory(self.player_rotation_address + self.player_info_size * self.player, 12)
+
+        if player_rotation_buffer is None:
+            return Vector3()
+
+        player_rotation_buffer = (
+            player_rotation_buffer[3::-1] +
+            player_rotation_buffer[7:3:-1] +
+            player_rotation_buffer[11:7:-1]
+        )
+
+        player_rotation = Vector3()
+        ctypes.memmove(ctypes.byref(player_rotation), player_rotation_buffer, ctypes.sizeof(player_rotation))
+
+        return player_rotation
+
 
     def get_hero_rotation(self) -> Vector3:
         """Player rotation is stored in big endian, so we need to convert it to little endian."""
@@ -74,8 +159,33 @@ class RC3Game(Game):
     def get_hero_state(self):
         return self.process.read_int(self.hero_state_address)
 
-    def set_controller_input(self, controller_input):
-        self.process.write_int(self.input_address, controller_input)
+    def set_controller_input(self, controller_input, left_joy_x, left_joy_y, right_joy_x, right_joy_y):
+        self.process.write_int(self.input_address + 0x8 * self.player, controller_input)
+
+        # self.joystick_l_x += left_joy_x
+        # self.joystick_l_y += left_joy_y
+        # self.joystick_r_x += right_joy_x
+        # self.joystick_r_y += right_joy_y
+
+        self.joystick_l_x = left_joy_x
+        self.joystick_l_y = left_joy_y
+        self.joystick_r_x = right_joy_x
+        self.joystick_r_y = right_joy_y
+
+        # Clamp all the joystick values between -1 and 1
+        self.joystick_l_x = np.clip(self.joystick_l_x, -1, 1)
+        self.joystick_l_y = np.clip(self.joystick_l_y, -1, 1)
+        self.joystick_r_x = np.clip(self.joystick_r_x, -1, 1)
+        self.joystick_r_y = np.clip(self.joystick_r_y, -1, 1)
+
+        joystick = 0
+
+        joystick = joystick | (int((self.joystick_l_x + 1) * 127) & 0xFF)
+        joystick = joystick | ((int((self.joystick_l_y + 1) * 127) & 0xFF) << 8)
+        joystick = joystick | ((int((self.joystick_r_x + 1) * 127) & 0xFF) << 16)
+        joystick = joystick | ((int((self.joystick_r_y + 1) * 127) & 0xFF) << 24)
+
+        self.process.write_int(self.joystick_address + 0x8 * self.player, joystick)
 
     def get_current_frame_count(self):
         frames_buffer = self.process.read_memory(self.frame_count_address, 4)
@@ -104,23 +214,88 @@ class RC3Game(Game):
     def set_vidcomic_state(self, state):
         self.process.write_byte(self.vidcomic_state_address, state)
 
-    # Collision info is an array of 8 floats
-    def get_collision_info(self):
+    def get_collisions(self, normalized=True):
         collisions = []
-        types = []
+        classes = []
 
+        # Fetch all the memory we need in one go
+
+        # 8 rows, 8 columns
         for i in range(16):
-            collision = self.process.read_float(self.collision_info_address + i * 4 * 2)
-            type = self.process.read_int(self.collision_info_address + i * 4 * 2 + 4)
+            for j in range(16):
+                offset = 4 * (i * 16 + j)
 
-            # Normalize
-            collision = np.interp(collision, [-10, 60], [-1.0, 1.0])
-            type = np.interp(type, [0, 1024*16], [-1.0, 1.0])
+                collision_address = self.collisions_address + offset
+                collision_value = self.process.read_float(collision_address + 0x500 * self.player)
+                # collision_value = Process.read_float_from_buffer(collision_memory, offset)
 
-            collisions.append(collision)
-            types.append(type)
+                class_address = self.collisions_class_address + offset
+                class_value = self.process.read_int(class_address + 0x500 * self.player, signed=True)
+                # class_value = Process.read_int_from_buffer(collision_memory, 0x100 + offset, signed=True)
 
-        return collisions, types
+                if normalized:
+                    collision_value = np.interp(collision_value, [-32, 64], [-1, 1])
+                    class_value = np.interp(class_value, [-64, 4096], [-1, 1])
+
+                collisions.append(collision_value)
+                classes.append(class_value)
+
+        return [*collisions, *classes]
+
+    def get_collisions_with_normals(self, normalized=False) -> list:
+        collisions = []
+        normals_x = []
+        normals_y = []
+        normals_z = []
+        classes = []
+
+        memory = self.process.read_memory(self.collisions_address + 0x500 * self.player, ((64*4) * 5))
+
+        # 8 rows, 8 columns
+        for i in range(8):
+            for j in range(8):
+                offset = 4 * (i * 8 + j)
+
+                collision_address = self.collisions_address + offset
+                collision_value = self.process.read_float_from_buffer(memory, 0x100 * 0 + offset)
+
+                class_address = self.collisions_class_address + offset
+                class_value = self.process.read_int_from_buffer(memory, 0x100 * 1 + offset, signed=True)
+
+                normal_x_address = self.collisions_normals_x + offset
+                normal_x = np.float64(self.process.read_float_from_buffer(memory, 0x100 * 2 + offset) / (1024 * 1024))
+
+                normal_y_address = self.collisions_normals_y + offset
+                normal_y = np.float64(self.process.read_float_from_buffer(memory, 0x100 * 3 + offset) / (1024 * 1024))
+
+                normal_z_address = self.collisions_normals_z + offset
+                normal_z = np.float64(self.process.read_float_from_buffer(memory, 0x100 * 4 + offset) / (1024 * 1024))
+
+                # Normalize the normal vector
+                # magnitude = np.sqrt(normal_x ** 2 + normal_y ** 2 + normal_z ** 2)
+                # if magnitude != 0:
+                #     normal_x /= magnitude
+                #     normal_y /= magnitude
+                #     normal_z /= magnitude
+
+                max = 1.0
+                min = -1.0
+
+                # assert min <= normal_x <= max, f"Normal x: {normal_x}"
+                # assert min <= normal_y <= max, f"Normal y: {normal_y}"
+                # assert min <= normal_z <= max, f"Normal z: {normal_z}"
+
+                if normalized:
+                    collision_value = np.interp(collision_value, [-32, 64], [-1, 1])
+                    class_value = np.interp(class_value, [-128, 4096], [-1, 1])
+
+                collisions.append(collision_value)
+                normals_x.append(normal_x)
+                normals_y.append(normal_y)
+                normals_z.append(normal_z)
+                classes.append(class_value)
+
+        return [*collisions, *classes, *normals_x, *normals_y, *normals_z]
 
     def get_health(self):
         return self.process.read_int(self.health_address)
@@ -134,26 +309,14 @@ class RC3Game(Game):
     def set_headless(self, headless: bool):
         self.process.write_int(self.headless_address, 1 if headless else 0)
 
-    def frame_advance(self, blocking=True):
-        if self.must_restart:
-            self.process.open_process()
-            self.must_restart = False
-
+    def frame_advance(self, frameskip=1):
         frame_count = self.get_current_frame_count()
+        target_frame = frame_count + frameskip
 
-        if blocking:
-            while frame_count == self.last_frame_count:
-                if self.must_restart:
-                    self.process.open_process()
-                    self.must_restart = False
+        self.process.write_int(self.frame_progress_address, target_frame)
 
-                    return False
-
-                frame_count = self.get_current_frame_count()
-
-            self.last_frame_count = frame_count
-
-        self.process.write_int(self.frame_progress_address, frame_count)
+        while frame_count < target_frame:
+            frame_count = self.get_current_frame_count()
 
         return True
 

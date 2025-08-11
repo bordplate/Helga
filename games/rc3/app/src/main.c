@@ -16,6 +16,7 @@ int main(void) {
     uint64_t flags = SYS_PROCESS_PRIMARY_STACK_SIZE_64K;
 
     sys_game_process_exitspawn("/dev_hdd0/game/BORD00003/USRDIR/EBOOT.mp.BIN", NULL, NULL, 0, 0, prio, flags);
+//    sys_game_process_exitspawn("/app_home/EBOOT.mp.BIN", NULL, NULL, 0, 0, prio, flags);
 
     return 0;
 }

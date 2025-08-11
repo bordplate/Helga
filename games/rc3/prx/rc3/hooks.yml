@@ -12,6 +12,18 @@ cellGameBootCheck:
     addr: 0x981064
     replacedInstr: stdu r1, -0x1a0(r1)
 
+STUB_008acc94:
+    addr: 0x8acc94
+    emitTrampoline: no
+
+spawn_moby:
+    addr: 0x1e6190
+    replacedInstr: stdu r1, -0x90(r1)
+
+ctf_flag_update_func:
+    addr: 0x7ffbd0
+    replacedInstr: stdu r1, -0xb0(r1)
+
 pre_game_loop:
     addr: 0x1d8840
     emitTrampoline: no
@@ -20,6 +32,10 @@ cellPadGetDataRedirect:
     addr: 0x9432d0
     replacedInstr: stdu r1, -0xa0(r1)
 
-render:
-    addr: 0x11b434
+update_mobys_func:
+    addr: 0x1ea690
     replacedInstr: stdu r1, -0x80(r1)
+
+render:
+    addr: 0x9a1398
+    replacedInstr: stdu r1, -0xa0(r1)

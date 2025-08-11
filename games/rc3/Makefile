@@ -106,7 +106,7 @@ all:
 # build package
 	cd $(PS3_SDK)/Tools && \
 	$(PKG_NPDRM) $(CURDIR)/package.conf $(BIN_DIR)/PS3_GAME && \
-	cp BDUPS3-BORD00001_00-0000000000000000.pkg $(BIN_DIR)/
+	cp BDUPS3-BORD00003_00-0000000000000000.pkg $(BIN_DIR)/
 
 sprx:
 	cd "$(PRX_DIR)" && "$(MAKE)" sprx GAME=$(GAME)
