@@ -31,7 +31,7 @@ Core:
   MFC Commands Shuffling Limit: 0
   MFC Commands Timeout: 0
   MFC Commands Shuffling In Steps: false
-  Enable TSX: Disabled
+  Enable TSX: Enabled
   XFloat Accuracy: Approximate
   Accurate PPU 128-byte Reservation Op Max Length: 0
   Stub PPU Traps: 0
@@ -55,8 +55,8 @@ Core:
   Clocks scale: 100
   SPU Wake-Up Delay: 0
   SPU Wake-Up Delay Thread Mask: 63
-  Max CPU Preempt Count: 0
-  Allow RSX CPU Preemptions: true
+  Max CPU Preempt Count: 200
+  Allow RSX CPU Preemptions: false
   Sleep Timers Accuracy: As Host
   Usleep Time Addend: 0
   Performance Report Threshold: 500
@@ -69,14 +69,14 @@ VFS:
   Disk cache maximum size (MB): 5120
   Empty /dev_hdd0/tmp/: true
 Video:
-  Renderer: Vulkan
-  Resolution: 720x480
+  Renderer: OpenGL
+  Resolution: 1280x720
   Aspect ratio: 16:9
-  Frame limit: Auto
+  Frame limit: 60
   Second Frame Limit: 0
   MSAA: Auto
   Shader Mode: Async Shader Recompiler
-  Shader Precision: High
+  Shader Precision: Low
   Write Color Buffers: false
   Write Depth Buffer: false
   Read Color Buffers: false
@@ -95,27 +95,27 @@ Video:
   Disable Video Output: false
   Disable Vertex Cache: false
   Disable FIFO Reordering: false
-  Enable Frame Skip: false
+  Enable Frame Skip: true
   Force CPU Blit: false
   Disable On-Disk Shader Cache: false
-  Disable Vulkan Memory Allocator: false
+  Disable Vulkan Memory Allocator: true
   Use full RGB output range: true
   Strict Texture Flushing: false
-  Multithreaded RSX: false
+  Multithreaded RSX: true
   Relaxed ZCULL Sync: false
   Force Hardware MSAA Resolve: false
   3D Display Mode: Disabled
   Debug Program Analyser: false
   Accurate ZCULL stats: false
-  Consecutive Frames To Draw: 1
-  Consecutive Frames To Skip: 1
+  Consecutive Frames To Draw: 2
+  Consecutive Frames To Skip: 2
   Resolution Scale: 100
   Anisotropic Filter Override: 0
   Texture LOD Bias Addend: 0
   Minimum Scalable Dimension: 16
   Shader Compiler Threads: 0
-  Driver Recovery Timeout: 1000000
-  Driver Wake-Up Delay: 1
+  Driver Recovery Timeout: 100000000
+  Driver Wake-Up Delay: 100
   Vblank Rate: 60
   Vblank NTSC Fixup: false
   DECR memory layout: false
@@ -123,14 +123,14 @@ Video:
   Disable MSL Fast Math: false
   Output Scaling Mode: Bilinear
   Vulkan:
-    Adapter: NVIDIA GeForce RTX 4070 Ti
-    Force FIFO present mode: false
-    Force primitive restart flag: false
+    Adapter: NVIDIA GeForce GTX 1070
+    Force FIFO present mode: true
+    Force primitive restart flag: true
     Exclusive Fullscreen Mode: Automatic
     Asynchronous Texture Streaming 2: false
-    FidelityFX CAS Sharpening Intensity: 50
+    FidelityFX CAS Sharpening Intensity: 0
     Asynchronous Queue Scheduler: Safe
-    VRAM allocation limit (MB): 65536
+    VRAM allocation limit (MB): 262144
   Performance Overlay:
     Enabled: false
     Enable Framerate Graph: false
@@ -233,6 +233,6 @@ Miscellaneous:
   Use native user interface: true
   GDB Server: 127.0.0.1:2345
   Silence All Logs: false
-  Window Title Format: "Evaluation Model - %F"
+  Window Title Format: "Evaluation Model"
   Pause Emulation During Home Menu: false
 Log: {}

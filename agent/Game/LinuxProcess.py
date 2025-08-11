@@ -1,6 +1,8 @@
 import os
 import ctypes
 import struct
+import time
+
 import psutil
 
 # Constants for process_vm_readv and process_vm_writev
@@ -36,6 +38,10 @@ class Process:
             return True
 
     def read_memory(self, address, size):
+        while self.process is None:
+            self.open_process()
+            time.sleep(1)
+
         buffer = ctypes.create_string_buffer(size)
         local_iov = Iovec(ctypes.cast(ctypes.pointer(buffer), ctypes.c_void_p), size)
         remote_iov = Iovec(ctypes.c_void_p(self.base_offset + address), size)
@@ -48,7 +54,9 @@ class Process:
         )
 
         if bytes_read == -1:
-            raise OSError("Failed to read memory")
+            # raise OSError("Failed to read memory")
+            print("Failed to read memory")
+            return [0 * size]
 
         return buffer.raw
 

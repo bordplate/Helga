@@ -156,8 +156,10 @@ void Game::on_tick() {
     // Player is most likely on intro menu scene. Present and handle multiplayer startup stuff.
     if (current_planet == 0 && frame_count > 10) {
         seen_planets[0] = 1;
+		seen_planets[4] = 1;
         seen_planets[9] = 1;
         *(int*)0xa10700 = 1;
+        //*(int*)0xa10704 = (int)4;  // Eudora
         *(int*)0xa10704 = (int)3;  // Kerwan
         //*(int*)0xa10704 = (int)9;  // Gaspar
         //*(int*)0x969c70 = (int)5;
@@ -200,6 +202,13 @@ void Game::on_tick() {
         //}
 	}
 
+	if (current_planet == 4 && frame_count < 2) {
+		Moby::delete_all(1120); // Suck Cannon
+		Moby::delete_all(805); // Spawn point thingy
+		//Moby::delete_all(1343); // Cuboid manager or something
+
+	}
+
     if (!current_view) {
         RemoteView* view = new RemoteView();
         this->transition_to(view);
@@ -217,7 +226,7 @@ void Game::on_tick() {
             if (checkpoint_moby == nullptr || checkpoint_moby->state >= 0x7f) {
                 checkpoint_moby = Moby::spawn(500, 0, 0);
                 checkpoint_moby->pUpdate = nullptr;
-                //checkpoint_moby->collision = nullptr;
+                checkpoint_moby->collision = nullptr;
                 checkpoint_moby->scale = 0.2f;
                 checkpoint_moby->alpha = 64;
             }
@@ -265,6 +274,10 @@ void Game::on_tick() {
             collision = camera_moby->collision;
             camera_moby->collision = nullptr;
         }
+
+		//if (checkpoint_moby != nullptr) {
+		//	checkpoint_moby->collision = checkpoint_collision;
+		//}
 
         for (int i = 0; i < rows; i++) {
             for (int j = 0; j < cols; j++) {
@@ -340,12 +353,14 @@ void Game::on_tick() {
         if (camera_moby != nullptr) {
             camera_moby->collision = collision;
         }
+
+		if (checkpoint_moby != nullptr) {
+			//checkpoint_moby->collision = nullptr;
+		}
     }
 
 
-    while (progress_frame_count < custom_frame_count && current_planet != 0) {
-        sys_ppu_thread_yield();
-    }
+    while (progress_frame_count < custom_frame_count && current_planet != 0) { sys_ppu_thread_yield(); }
     custom_frame_count += 1;
 
     return;

@@ -55,3 +55,7 @@ _unlock_level:
 some_rendering_func:
     addr: 0x6bb78
     replacedInstr: stdu r1, -0xc0(r1)
+
+_moby_get_damage:
+    addr: 0x10675c
+    replacedInstr: cmpwi cr1, r5, 0x0

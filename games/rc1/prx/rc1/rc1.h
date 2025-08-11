@@ -14,6 +14,7 @@ extern "C" {
 #endif
 
 #define should_render *((int*)0xB00030)
+#define did_damage *((int*)0xB00034)
 
 typedef enum GameState {
     PlayerControl = 0,

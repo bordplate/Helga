@@ -8,6 +8,61 @@ from Game.Game import Game, Vector3
 
 
 class RC1Game(Game):
+    class BoltCrank:
+        class BoltCrankVars(ctypes.Structure):
+            _fields_ = [("something", ctypes.c_float)]
+
+        def __init__(self, uid: int):
+            self.uid = uid
+            self.moby = None
+            self.game = None
+            self.started = False
+            self.cranking = False
+
+            self.have_cranked = False
+
+            self.last_crank_value = 0.0
+
+        def start(self, game) -> bool:
+            self.game = game
+            self.started = True
+            self.moby = game.find_moby_by_uid(self.uid)
+
+            state = int.from_bytes(self.moby.state, byteorder='big')
+
+            if state == 4 or state == 5:
+                print("It has been cranked!")
+                return False
+
+            return True
+
+        def step(self):
+            self.moby.update_moby_data(self.game.process)
+
+            if self.moby.UID != self.uid:
+                self.moby = self.game.find_moby_by_uid(self.uid)
+
+            self.moby.populate_pvars_with_ctype(self.game.process, self.BoltCrankVars)
+
+            state = int.from_bytes(self.moby.state, byteorder='big')
+
+            reward = 0
+
+            if state == 3 and self.moby.vars.something > self.last_crank_value:
+                self.cranking = True
+                self.have_cranked = True
+                reward += 0.1
+            elif self.have_cranked and self.moby.vars.something >= 1.0:
+                return 5, True
+
+            if self.last_crank_value > self.moby.vars.something and self.cranking:
+                self.cranking = False
+                reward -= 0.75
+
+            self.last_crank_value = self.moby.vars.something
+
+            return (reward, False)
+
     offset = 0x300000000
 
     frame_count_address = 0xB00000
@@ -26,6 +81,7 @@ class RC1Game(Game):
     nanotech_address = 0x96BF88
     max_nanotech_address = 0x71fb28
     items_address = 0x96C140
+    bolts_address = 0x969ca0
 
     collisions_address = 0xB00600 + ((256*4) * 0)
     collisions_class_address = 0xB00600 + ((256*4) * 1)
@@ -37,6 +93,7 @@ class RC1Game(Game):
     oscillation_offset_y_address = 0xB00064
 
     should_render_address = 0xB00030
+    did_damage_address = 0xB00034
 
     coll_forward_address = 0xB00030
     coll_up_address = 0xB00034
@@ -60,6 +117,9 @@ class RC1Game(Game):
     checkpoint_position_address = 0xb00400
 
     death_count_address = 0xB00500
+
+    moby_ptr_start = 0xa390a0
+    moby_ptr_end = 0xa390a4
 
     joystick_l_x = 0.0
     joystick_l_y = 0.0
@@ -211,6 +271,9 @@ class RC1Game(Game):
         ctypes.memmove(ctypes.byref(player_position), player_position_buffer, ctypes.sizeof(player_position))
 
         return player_position
+
+    def get_bolts(self) -> int:
+        return self.process.read_int(self.bolts_address)
 
     def get_player_rotation(self) -> Vector3:
         """Player rotation is stored in big endian, so we need to convert it to little endian."""
@@ -431,6 +494,12 @@ class RC1Game(Game):
     def get_death_count(self):
         return self.process.read_int(self.death_count_address)
 
+    def get_did_damage(self):
+        return self.process.read_int(self.did_damage_address)
+
+    def reset_did_damage(self):
+        self.process.write_int(self.did_damage_address, 0)
+
     def start_hoverboard_race(self):
         """
         To start the hoverboard race, we have to find a specific NPC in the game and set two of its properties to 3.
@@ -440,10 +509,24 @@ class RC1Game(Game):
         self.process.write_byte(hoverboard_lady_ptr + 0x20, 3)
         self.process.write_byte(hoverboard_lady_ptr + 0xbc, 3)
 
-    def set_checkpoint_position(self, position: Vector3):
+    def set_checkpoint_position(self, position: Vector3 | BoltCrank):
+        if type(position) is RC1Game.BoltCrank:
+            if not position.started:
+                position.start(self)
+
+            crank_moby = position.moby
+
+            assert crank_moby.oClass == 280, f"Expected BoltCrank (280), but got {crank_moby.oClass}"
+
+            position = Vector3(
+                crank_moby.position.x,
+                crank_moby.position.y,
+                crank_moby.position.z + 2
+            )
+
         position_x = struct.pack('>f', position.x)
         position_y = struct.pack('>f', position.y)
-        position_z = struct.pack('>f', position.z)
+        position_z = struct.pack('>f', position.z + 0.5)
 
         self.process.write_memory(self.checkpoint_position_address, position_x)
         self.process.write_memory(self.checkpoint_position_address + 4, position_y)
@@ -462,3 +545,294 @@ class RC1Game(Game):
             frame_count = self.get_current_frame_count()
 
         return True
+
+    def mobys(self):
+        moby_size = 0x100
+        moby_start = self.process.read_int(self.moby_ptr_start)
+        moby_end = self.process.read_int(self.moby_ptr_end)
+
+        for address in range(moby_start, moby_end, moby_size):
+            moby_data = self.process.read_memory(address, moby_size+4)
+            if moby_data:
+                moby = Moby()
+                offset = 0
+
+                for field_name, field_type in moby._fields_:
+                    field_size = ctypes.sizeof(field_type)
+                    field_data = moby_data[offset:offset + field_size]
+
+                    assert len(field_data) == field_size, \
+                        f"Field data size mismatch: {len(field_data)} != {field_size}. At offset: {offset}"
+
+                    signed = field_type in [ctypes.c_char, ctypes.c_int8, ctypes.c_int16, ctypes.c_int32, ctypes.c_int64]
+
+                    if field_size == 1:
+                        value = field_data[0]
+                    elif field_size == 2:
+                        if signed:
+                            value = struct.unpack('>h', field_data)[0]
+                        else:
+                            value = struct.unpack('>H', field_data)[0]
+                    elif field_size == 4:
+                        if field_type == ctypes.c_float:
+                            value = struct.unpack('>f', field_data)[0]
+                        else:
+                            if signed:
+                                value = struct.unpack('>i', field_data)[0]
+                            else:
+                                value = struct.unpack('>I', field_data)[0]
+                    elif field_size == 8:
+                        raise ValueError(f"Unsupported field size: {field_size} for data type {field_type}")
+                    else:
+                        if field_type is Vec4:
+                            value = Vec4()
+
+                            # Get all the fields individually and convert them to little endian
+                            value.x = struct.unpack('>f', field_data[0:4])[0]
+                            value.y = struct.unpack('>f', field_data[4:8])[0]
+                            value.z = struct.unpack('>f', field_data[8:12])[0]
+                            value.w = struct.unpack('>f', field_data[12:16])[0]
+                        else:
+                            raise ValueError(f"Unsupported field size: {field_size} for data type {field_type}")
+
+                    setattr(moby, field_name, value)
+                    offset += field_size
+
+                moby.address = address
+
+                yield moby
+
+    def find_mobys_by_oclass(self, oclass):
+        for moby in self.mobys():
+            if moby.oClass == oclass:
+                yield moby
+
+    def find_moby_by_uid(self, uid):
+        for moby in self.mobys():
+            if moby.UID == uid:
+                return moby
+
+        return None
+
+    def zero_fill(self, address, size):
+        self.process.write_memory(address, b'\x00' * size)
+
+    def get_save_data(self):
+        save_data_ptr_address = 0x8fa640
+
+        save_data_ptr = self.process.read_int(save_data_ptr_address)
+
+        save_data = self.process.read_memory(save_data_ptr, 0x465)
+
+        return save_data
+
+    def set_save_data(self, data):
+        save_data_ptr_address = 0x8fa640
+
+        save_data_ptr = self.process.read_int(save_data_ptr_address)
+
+        self.process.write_memory(save_data_ptr, data)
+
+    def reset_level_flags(self, level):
+        level_flags_addr = 0xa545c4
+        global_flags_addr = 0xa0cd1c
+
+        self.zero_fill(level_flags_addr, 65534)
+        self.zero_fill(global_flags_addr + level*0x100, 0x1fff)
+
+        self.zero_fill(0xa0e11c + level, 0x100)
+        self.zero_fill(0xa0cbc4 + level, 0x10)
+        self.zero_fill(0xa0ca84 + level, 0x10)
+        self.zero_fill(0x96ca34 + level, 0x8000)
+
+        self.zero_fill(0x72b330, 0x714)
+        self.zero_fill(0xa104ac, 0x96)
+
+        # memset( & DAT_0096c24c, 0, 0x790);
+        # memset( & DAT_00a1000c, 0, 0x4a0);
+        # memset( & DAT_00a0feec, 0, 0x120);
+        # memset( & DAT_00a0fdc4, 0, 0x128);
+
+        self.zero_fill(0x96c24c, 0x790)
+        self.zero_fill(0xa1000c, 0x4a0)
+        self.zero_fill(0xa0feec, 0x120)
+        self.zero_fill(0xa0fdc4, 0x128)
+
+
+class Vec4(ctypes.Structure):
+    _fields_ = [
+        ("x", ctypes.c_float),
+        ("y", ctypes.c_float),
+        ("z", ctypes.c_float),
+        ("w", ctypes.c_float)
+    ]
+
+
+class Moby(ctypes.Structure):
+    _fields_ = [
+        ("coll_pos", Vec4),
+        ("position", Vec4),
+        ("state", ctypes.c_char),
+        ("group", ctypes.c_char),
+        ("mClass", ctypes.c_char),
+        ("alpha", ctypes.c_char),
+        ("pClass", ctypes.c_int32),
+        ("pChain", ctypes.c_uint32),
+        ("scale", ctypes.c_float),
+        ("update_distance", ctypes.c_char),
+        ("enabled", ctypes.c_char),
+        ("draw_distance", ctypes.c_short),
+        ("mode_bits", ctypes.c_ushort),
+        ("field19_0x36", ctypes.c_ushort),
+        ("stateTimerMaybe", ctypes.c_uint32),
+        ("field21_0x3c", ctypes.c_char),
+        ("field22_0x3d", ctypes.c_char),
+        ("field23_0x3e", ctypes.c_char),
+        ("field24_0x3f", ctypes.c_char),
+        ("rotation", Vec4),
+        ("field26_0x50", ctypes.c_char),
+        ("animationFrame", ctypes.c_char),
+        ("updateID", ctypes.c_uint8),
+        ("animationID", ctypes.c_uint8),
+        ("field30_0x54", ctypes.c_float),
+        ("field34_0x58", ctypes.c_float),
+        ("field35_0x5c", ctypes.c_float),
+        ("field36_0x60", ctypes.c_uint32),
+        ("field40_0x64", ctypes.c_int32),
+        ("field41_0x68", ctypes.c_uint32),
+        ("field42_0x6c", ctypes.c_uint32),
+        ("field43_0x70", ctypes.c_char),
+        ("field44_0x71", ctypes.c_char),
+        ("field45_0x72", ctypes.c_char),
+        ("field46_0x73", ctypes.c_char),
+        ("pUpdate", ctypes.c_uint32),
+        ("pVars", ctypes.c_uint32),
+        ("field49_0x7c", ctypes.c_char),
+        ("field50_0x7d", ctypes.c_char),
+        ("field51_0x7e", ctypes.c_char),
+        ("animStateMaybe", ctypes.c_char),
+        ("field53_0x80", ctypes.c_uint32),
+        ("field54_0x84", ctypes.c_int32),
+        ("field55_0x88", ctypes.c_int32),
+        ("field56_0x8c", ctypes.c_char),
+        ("field57_0x8d", ctypes.c_char),
+        ("field58_0x8e", ctypes.c_char),
+        ("field59_0x8f", ctypes.c_char),
+        ("parent", ctypes.c_int32),
+        ("collision", ctypes.c_int32),
+        ("collisionMesh", ctypes.c_int32),
+        ("field63_0x9c", ctypes.c_uint32),
+        ("field64_0xa0", ctypes.c_char),
+        ("field65_0xa1", ctypes.c_char),
+        ("field66_0xa2", ctypes.c_char),
+        ("field67_0xa3", ctypes.c_char),
+        ("field68_0xa4", ctypes.c_char),
+        ("field69_0xa5", ctypes.c_char),
+        ("oClass", ctypes.c_short),
+        ("field71_0xa8", ctypes.c_int32),
+        ("field72_0xac", ctypes.c_uint32),
+        ("field73_0xb0", ctypes.c_char),
+        ("field74_0xb1", ctypes.c_char),
+        ("UID", ctypes.c_ushort),
+        ("field76_0xb4", ctypes.c_char),
+        ("field77_0xb5", ctypes.c_char),
+        ("field78_0xb6", ctypes.c_char),
+        ("field79_0xb7", ctypes.c_char),
+        ("field80_0xb8", ctypes.c_int32),
+        ("field81_0xbc", ctypes.c_char),
+        ("field82_0xbd", ctypes.c_char),
+        ("field83_0xbe", ctypes.c_char),
+        ("field84_0xbf", ctypes.c_char),
+        ("forward", Vec4),
+        ("right", Vec4),
+        ("up", Vec4),
+        ("something", Vec4)
+    ]
+
+    def pvar_data(self, process):
+        pvar_mem = process.read_memory(self.pVars, 0x70)
+
+        if pvar_mem:
+            pvar_data = np.frombuffer(pvar_mem, dtype=np.uint8)
+            return pvar_data
+
+        return None
+
+    def update_moby_data(self, process):
+        moby_mem = process.read_memory(self.address, ctypes.sizeof(self))
+
+        if moby_mem:
+            offset = 0
+
+            for field_name, field_type in self._fields_:
+                field_size = ctypes.sizeof(field_type)
+                field_data = moby_mem[offset:offset + field_size]
+
+                assert len(field_data) == field_size, \
+                    f"Field data size mismatch: {len(field_data)} != {field_size}. At offset: {offset}"
+
+                if field_size == 1:
+                    value = field_data[0]
+                elif field_size == 2:
+                    value = struct.unpack('>H', field_data)[0]
+                elif field_size == 4:
+                    if field_type == ctypes.c_float:
+                        value = struct.unpack('>f', field_data)[0]
+                    else:
+                        value = struct.unpack('>I', field_data)[0]
+                elif field_size == 8:
+                    raise ValueError(f"Unsupported field size: {field_size} for data type {field_type}")
+                else:
+                    if field_type is Vec4:
+                        value = Vec4()
+
+                        # Get all the fields individually and convert them to little endian
+                        value.x = struct.unpack('>f', field_data[0:4])[0]
+                        value.y = struct.unpack('>f', field_data[4:8])[0]
+                        value.z = struct.unpack('>f', field_data[8:12])[0]
+                        value.w = struct.unpack('>f', field_data[12:16])[0]
+                    else:
+                        raise ValueError(f"Unsupported field size: {field_size} for data type {field_type}")
+
+                setattr(self, field_name, value)
+                offset += field_size
+
+
+    def populate_pvars_with_ctype(self, process, var_type: '_ctypes.PyCStructType'):
+        pvar_mem = process.read_memory(self.pVars, ctypes.sizeof(var_type))
+
+        if pvar_mem:
+            self.vars = var_type()
+            offset = 0
+
+            for field_name, field_type in self.vars._fields_:
+                field_size = ctypes.sizeof(field_type)
+                field_data = pvar_mem[offset:offset + field_size]
+
+                assert len(field_data) == field_size, \
+                    f"Field data size mismatch: {len(field_data)} != {field_size}. At offset: {offset}"
+
+                if field_size == 1:
+                    value = field_data[0]
+                elif field_size == 2:
+                    value = struct.unpack('>H', field_data)[0]
+                elif field_size == 4:
+                    if field_type == ctypes.c_float:
+                        value = struct.unpack('>f', field_data)[0]
+                    else:
+                        value = struct.unpack('>I', field_data)[0]
+                elif field_size == 8:
+                    raise ValueError(f"Unsupported field size: {field_size} for data type {field_type}")
+                else:
+                    if field_type is Vec4:
+                        value = Vec4()
+
+                        # Get all the fields individually and convert them to little endian
+                        value.x = struct.unpack('>f', field_data[0:4])[0]
+                        value.y = struct.unpack('>f', field_data[4:8])[0]
+                        value.z = struct.unpack('>f', field_data[8:12])[0]
+                        value.w = struct.unpack('>f', field_data[12:16])[0]
+                    else:
+                        raise ValueError(f"Unsupported field size: {field_size} for data type {field_type}")
+
+                setattr(self.vars, field_name, value)

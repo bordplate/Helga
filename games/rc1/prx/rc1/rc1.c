@@ -194,6 +194,7 @@ SHK_HOOK(int32_t, cellPadGetDataRedirect, uint32_t, CellPadData*);
 int32_t cellPadGetDataRedirectHook(uint32_t port_no, CellPadData *data) {
     int32_t ret = cellPadGetData(port_no, data);
 
+
     int32_t len = data->len;
 
     memset(data, 0, 16);
@@ -223,6 +224,31 @@ int32_t cellPadGetDataRedirectHook(uint32_t port_no, CellPadData *data) {
     return ret;
 }
 
+struct Damage {
+	u8 pad[0x10];
+	Vec4 position;
+	Moby* damaged_moby;
+	u8 pad2[0x6];
+	u16 source_o_class;
+	float damage_dealt;
+};
+
+SHK_HOOK(struct Damage*, _moby_get_damage, Moby*, u32, u32);
+struct Damage* _moby_get_damage_hook(Moby* moby, u32 a2, u32 a3) {
+    struct Damage* damage = SHK_CALL_HOOK(_moby_get_damage, moby, a2, a3);
+
+	if (!damage) {
+		return nullptr;
+	}
+
+	if (damage->source_o_class == 71) {
+		MULTI_LOG("Damage dealt: %f\n", damage->damage_dealt);
+		did_damage = 1;
+	}
+
+	return damage;
+}
+
 void rc1_init() {
     MULTI_LOG("Multiplayer initializing.\n");
 
@@ -243,6 +269,7 @@ void rc1_init() {
     SHK_BIND_HOOK(_unlock_level, _unlock_level_hook);
     SHK_BIND_HOOK(cellPadGetDataRedirect, cellPadGetDataRedirectHook);
     SHK_BIND_HOOK(some_rendering_func, some_rendering_func_hook);
+	SHK_BIND_HOOK(_moby_get_damage, _moby_get_damage_hook);
 
     MULTI_LOG("Bound hooks\n");
 }

@@ -87,6 +87,18 @@ Moby* Moby::find_last(unsigned short o_class) {
     return last;
 }
 
+Moby* Moby::find_by_uid(unsigned short uid) {
+	Moby* moby;
+
+	for (moby = moby_ptr; moby <= moby_ptr_end; moby++) {
+        if (moby->state < 0x7f && moby->UID == uid) {
+            return moby;
+        }
+    }
+
+	return moby;
+}
+
 void Moby::delete_all(unsigned short o_class) {
     for (Moby *moby = moby_ptr; moby <= moby_ptr_end; moby++) {
         if (moby->state < 0x7f && moby->oClass == o_class) {

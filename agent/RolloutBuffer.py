@@ -77,7 +77,7 @@ class RolloutBuffer:
                 # Buffer is now full and ready to be processed. Instead of adding the rest of the observations, we now
                 #  shift the worker buffer so that the overflowing observations are at the start of the buffer and then
                 #  we keep collecting new samples from the agent while the current ones are being sampled.
-                if self.new_samples >= self.batch_size:
+                if self.new_samples >= self.buffer_size:
                     self.ready = True
 
                     self.worker_buffers[worker] = buffer[i:]
@@ -107,8 +107,12 @@ class RolloutBuffer:
     def clear(self):
         self.lock.acquire()
 
-        if self.buffer_size - len(self.buffer) < self.batch_size:
-            self.buffer = self.buffer[self.batch_size:]
+        #if self.buffer_size - len(self.buffer) < self.batch_size:
+        #    self.buffer = self.buffer[self.batch_size:]
+
+        self.buffer = []
+
+        self.worker_buffers = {}
 
         self.total = len(self.buffer)
         self.new_samples = 0

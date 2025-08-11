@@ -49,6 +49,8 @@ private:
     Moby* checkpoint_moby;
     float checkpoint_bounce_z;
 
+	unsigned short *checkpoint_collision;
+
     bool oscillation_direction_x;
     bool oscillation_direction_y;
 };
