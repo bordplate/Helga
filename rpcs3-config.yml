@@ -1,6 +1,6 @@
 Core:
   PPU Decoder: Recompiler (LLVM)
-  PPU Threads: 4
+  PPU Threads: 2
   PPU Debug: false
   PPU Calling History: false
   Save LLVM logs: false
@@ -12,13 +12,13 @@ Core:
   Set DAZ and FTZ: false
   SPU Decoder: Recompiler (LLVM)
   SPU Reservation Busy Waiting Percentage: 0
-  SPU GETLLAR Busy Waiting Percentage: 100
+  SPU GETLLAR Busy Waiting Percentage: 0
   SPU Debug: false
   MFC Debug: false
   Preferred SPU Threads: 0
   SPU delay penalty: 3
-  SPU loop detection: false
-  Max SPURS Threads: 6
+  SPU loop detection: true
+  Max SPURS Threads: 2
   SPU Block Size: Safe
   Accurate SPU DMA: false
   Accurate SPU Reservations: true
@@ -26,7 +26,7 @@ Core:
   Accurate RSX reservation access: false
   RSX FIFO Accuracy: Fast
   SPU Verification: false
-  SPU Cache: false
+  SPU Cache: true
   SPU Profiler: false
   MFC Commands Shuffling Limit: 0
   MFC Commands Timeout: 0
@@ -70,13 +70,13 @@ VFS:
   Empty /dev_hdd0/tmp/: true
 Video:
   Renderer: "Null"
-  Resolution: 720x480
+  Resolution: 1920x1080
   Aspect ratio: 16:9
   Frame limit: Off
   Second Frame Limit: 0
   MSAA: Auto
   Shader Mode: Async Shader Recompiler
-  Shader Precision: High
+  Shader Precision: Low
   Write Color Buffers: false
   Write Depth Buffer: false
   Read Color Buffers: false
@@ -101,15 +101,15 @@ Video:
   Disable Vulkan Memory Allocator: false
   Use full RGB output range: true
   Strict Texture Flushing: false
-  Multithreaded RSX: false
-  Relaxed ZCULL Sync: false
+  Multithreaded RSX: true
+  Relaxed ZCULL Sync: true
   Force Hardware MSAA Resolve: false
   3D Display Mode: Disabled
   Debug Program Analyser: false
   Accurate ZCULL stats: false
   Consecutive Frames To Draw: 1
   Consecutive Frames To Skip: 1
-  Resolution Scale: 50
+  Resolution Scale: 100
   Anisotropic Filter Override: 0
   Texture LOD Bias Addend: 0
   Minimum Scalable Dimension: 16
@@ -121,7 +121,7 @@ Video:
   DECR memory layout: false
   Allow Host GPU Labels: false
   Disable MSL Fast Math: false
-  Output Scaling Mode: Bilinear
+  Output Scaling Mode: FidelityFX Super Resolution
   Vulkan:
     Adapter: NVIDIA GeForce RTX 4070 Ti
     Force FIFO present mode: false
@@ -168,8 +168,8 @@ Audio:
   Audio Channel Layout: Automatic
   Audio Device: "@@@default@@@"
   Master Volume: 100
-  Enable Buffering: true
-  Desired Audio Buffer Duration: 100
+  Enable Buffering: false
+  Desired Audio Buffer Duration: 4
   Enable Time Stretching: false
   Disable Sampling Skip: false
   Time Stretching Threshold: 75
@@ -178,7 +178,7 @@ Audio:
   Music Handler: Qt
 Input/Output:
   Keyboard: "Null"
-  Mouse: Basic
+  Mouse: "Null"
   Camera: "Null"
   Camera type: Unknown
   Camera flip: None
@@ -202,13 +202,13 @@ System:
   Keyboard Type: English keyboard (US standard)
   Enter button assignment: Enter with cross
   Console time offset (s): 0
-  System Name: RPCS3-685
+  System Name: RPCS3-218
   PSID high: 0
   PSID low: 0
   HDD Model Name: ""
   HDD Serial Number: ""
 Net:
-  Internet enabled: Disconnected
+  Internet enabled: Connected
   IP address: 0.0.0.0
   Bind address: 0.0.0.0
   DNS address: 8.8.8.8
@@ -223,7 +223,7 @@ Savestate:
   Save Disc Game Data: false
 Miscellaneous:
   Automatically start games after boot: true
-  Exit RPCS3 when process finishes: false
+  Exit RPCS3 when process finishes: true
   Pause emulation on RPCS3 focus loss: false
   Start games in fullscreen mode: false
   Prevent display sleep while running games: true

@@ -26,8 +26,9 @@ class Process:
 
         # Find the process in the process list
         for process in psutil.process_iter(['pid', 'name']):
-            if process.info['pid'] == self.pid:
+            if process.info['pid'] == self.pid or process.info['name'] == self.pid:
                 self.process = process
+                self.pid = process.info['pid']
                 break
 
         if self.process is None:

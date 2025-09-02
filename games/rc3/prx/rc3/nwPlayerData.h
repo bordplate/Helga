@@ -9,7 +9,9 @@
 #include "../lib/types.h"
 
 struct nwPlayerData {
-    char pad0[0x2568];
+	char pad00[0x19e4];
+	int state;
+    char pad0[0xb80];
     float health;
     char pad1[0xac];
     struct Moby *player_moby;

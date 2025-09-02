@@ -7,7 +7,7 @@ OBJCOPY = $(WINE) $(PS3_SDK)/host-win32/ppu/bin/ppu-lv2-objcopy.exe
 OBJDUMP = $(WINE) $(PS3_SDK)/host-win32/ppu/bin/ppu-lv2-objdump.exe
 BIN2RPCS3PATCH = ../tools/bin2rpcs3patch.py
 BUILD_DIR = build
-SCETOOL = $(WINE) $(PS3_SDK)/Tools/scetool.2.9.exe
+SCETOOL = $(PS3_SDK)/Tools/scetool.2.9.exe
 
 APPLYPATCH = ../tools/apply_patch.py
 

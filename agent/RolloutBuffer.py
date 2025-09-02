@@ -21,6 +21,8 @@ class RolloutBuffer:
         self.new_samples = 0
         self.lock = Lock()
 
+        self.worker_lock = Lock()
+
         self.ready = False
 
         # self.hidden_state = torch.zeros((cell_size), dtype=torch.bfloat16, device='cpu')
@@ -57,60 +59,61 @@ class RolloutBuffer:
 
         return buffer
 
-    def add(self, worker: str, state, actions, reward, done, logprob, state_value, hidden_state, cell_state):
-        if worker not in self.worker_buffers:
-            self.worker_buffers[worker] = []
+    def add(self, worker: str, state, actions, reward, done, logprob, state_value):
+        with self.worker_lock:
+            if worker not in self.worker_buffers:
+                self.worker_buffers[worker] = []
 
-        buffer = self.worker_buffers[worker]
+            buffer = self.worker_buffers[worker]
 
-        if (len(buffer) >= self.batch_size or done) and not self.ready:
-            # self.compute_returns_and_advantages(buffer, state_value.to('cpu'), done)
+            if (len(buffer) >= self.batch_size or done) and not self.ready:
+                # self.compute_returns_and_advantages(buffer, state_value.to('cpu'), done)
 
-            # Add the buffer to the main buffer
-            self.lock.acquire()
+                # Add the buffer to the main buffer
+                self.lock.acquire()
 
-            for i in range(len(buffer)):
-                self.buffer += [buffer[i]]
-                self.total += 1
-                self.new_samples += 1
+                for i in range(len(buffer)):
+                    self.buffer += [buffer[i]]
+                    self.total += 1
+                    self.new_samples += 1
 
-                # Buffer is now full and ready to be processed. Instead of adding the rest of the observations, we now
-                #  shift the worker buffer so that the overflowing observations are at the start of the buffer and then
-                #  we keep collecting new samples from the agent while the current ones are being sampled.
-                if self.new_samples >= self.buffer_size:
-                    self.ready = True
+                    # Buffer is now full and ready to be processed. Instead of adding the rest of the observations, we now
+                    #  shift the worker buffer so that the overflowing observations are at the start of the buffer and then
+                    #  we keep collecting new samples from the agent while the current ones are being sampled.
+                    if self.new_samples >= self.batch_size:
+                        self.ready = True
 
-                    self.worker_buffers[worker] = buffer[i:]
+                        self.worker_buffers[worker] = buffer[i:]
 
-                    break
-                else:
-                    self.worker_buffers[worker] = []
+                        break
+                    else:
+                        self.worker_buffers[worker] = []
 
-            self.lock.release()
+                self.lock.release()
 
-            return
+                return
 
-        state = state.to('cpu')
-        actions = actions.to('cpu')
-        reward = torch.tensor(reward, dtype=torch.bfloat16, device='cpu')
-        done = torch.tensor(done, dtype=torch.bool, device='cpu')
-        logprob = logprob.to('cpu')
-        state_value = state_value.to('cpu')
+            state = state.to('cpu')
+            actions = actions.to('cpu')
+            reward = torch.tensor(reward, dtype=torch.bfloat16, device='cpu')
+            done = torch.tensor(done, dtype=torch.bool, device='cpu')
+            logprob = logprob.to('cpu')
+            state_value = state_value.to('cpu')
 
-        buffer += [(state, actions, reward, done, logprob, state_value, None, None, 0, 0)]
+            buffer += [(state, actions, reward, done, logprob, state_value, None, None, 0, 0)]
 
-        if len(buffer) >= self.batch_size:
-            self.worker_buffers[worker] = buffer[-self.batch_size:]
+            if len(buffer) >= self.batch_size:
+                self.worker_buffers[worker] = buffer[-self.batch_size:]
 
-        # buffer[self.position] = (state, actions, reward, done, logprob, state_value, hidden_state.to('cpu').unsqueeze(dim=0), cell_state.to('cpu').unsqueeze(dim=0))
+            # buffer[self.position] = (state, actions, reward, done, logprob, state_value, hidden_state.to('cpu').unsqueeze(dim=0), cell_state.to('cpu').unsqueeze(dim=0))
 
     def clear(self):
         self.lock.acquire()
 
-        #if self.buffer_size - len(self.buffer) < self.batch_size:
-        #    self.buffer = self.buffer[self.batch_size:]
-
-        self.buffer = []
+        if self.buffer_size - len(self.buffer) < self.batch_size:
+            self.buffer = self.buffer[self.batch_size:]
+        # else:
+        #     self.buffer = []
 
         self.worker_buffers = {}
 
@@ -149,6 +152,8 @@ class RolloutBuffer:
                 self.cached[i] = processed
 
                 yield processed
+            elif None in batch:
+                print("\nNone in batch!\n")
 
     def _process_batch(self, batch):
         with torch.no_grad():

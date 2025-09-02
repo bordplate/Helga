@@ -116,26 +116,38 @@ void ctf_flag_update_func_hook(Moby* moby) {
 
 //#define headless *((int*)0xcc5200)
 
-SHK_HOOK(void, render, int, char*);
-void render_hook(int a1, char* pass) {
-//    return;
-//    if (strcmp(pass, "Shrub") == 0 ||
-//        strcmp(pass, "Frame") == 0) {
-//        MULTI_LOG("Ignoring %s\n", pass);
-//        return;
-//    }
+//SHK_HOOK(void, render, int, char*);
+//void render_hook(int a1, char* pass) {
+////    return;
+////    if (strcmp(pass, "Shrub") == 0 ||
+////        strcmp(pass, "Frame") == 0) {
+////        MULTI_LOG("Ignoring %s\n", pass);
+////        return;
+////    }
+//
+//    SHK_CALL_HOOK(render, a1, pass);
+//}
 
-    SHK_CALL_HOOK(render, a1, pass);
-}
-
-#define remote_pressed_buttons *((int*)0xcc5200)
-#define remote_joysticks *((int*)0xcc5204)
+#define remote_pressed_buttons 0xcc5200
+#define last_remote_pressed_buttons 0xcc5300
+#define remote_joysticks 0xcc5204
 
 SHK_HOOK(int32_t, cellPadGetDataRedirect, uint32_t, CellPadData*);
 int32_t cellPadGetDataRedirectHook(uint32_t port_no, CellPadData *data) {
     int32_t ret = cellPadGetData(port_no, data);
 
-    if (port_no == 2) {
+	int pressed_buttons;
+	int joysticks;
+	int last_pressed_buttons;
+	memcpy(&pressed_buttons, (void*)(remote_pressed_buttons + 0x8 * port_no), 4);
+	memcpy(&joysticks, (void*)(remote_joysticks + 0x8 * port_no), 4);
+	memcpy(&last_pressed_buttons, (void*)(last_remote_pressed_buttons + 0x8 * port_no), 4);
+
+	//if (port_no == 0) {
+	//	return ret;
+	//}
+
+    //if (port_no == 0) {
         int32_t len = data->len;
 
         memset(data, 0, 16);
@@ -148,19 +160,22 @@ int32_t cellPadGetDataRedirectHook(uint32_t port_no, CellPadData *data) {
 //    }
 
         if (current_level != 0) {
-//            if (data->len == 0 && (remote_pressed_buttons != last_remote_pressed_buttons)) {
-            if (data->len == 0) {
+            if (data->len == 0 && ((remote_pressed_buttons + 0x8 * port_no) != (last_remote_pressed_buttons + 0x8 * port_no))) {
+            //if (data->len == 0) {
                 data->len = 24;
             }
 
-            data->button[2] |= ((remote_pressed_buttons + 0x8 * port_no) & 0xff00) >> 8;
-            data->button[3] |= (remote_pressed_buttons + 0x8 * port_no) & 0x00ff;
-            data->button[4] = ((remote_joysticks + 0x8 * port_no) & 0x000000ff);
-            data->button[5] = ((remote_joysticks + 0x8 * port_no) & 0x0000ff00) >> 8;
-            data->button[6] = ((remote_joysticks + 0x8 * port_no) & 0x00ff0000) >> 16;
-            data->button[7] = ((remote_joysticks + 0x8 * port_no) & 0xff000000) >> 24;
+            data->button[2] |= (pressed_buttons & 0xff00) >> 8;
+            data->button[3] |= pressed_buttons & 0x00ff;
+            data->button[4] = (joysticks & 0x000000ff);
+            data->button[5] = (joysticks & 0x0000ff00) >> 8;
+            data->button[6] = (joysticks & 0x00ff0000) >> 16;
+            data->button[7] = (joysticks & 0xff000000) >> 24;
+
+			//*(int*)(last_remote_pressed_buttons + 0x8 * port_no) = (remote_pressed_buttons + 0x8 * port_no);
+			memcpy((void*)(last_remote_pressed_buttons + 0x8 * port_no), &pressed_buttons, 4);
         }
-    }
+    //}
 
     return ret;
 }
@@ -177,7 +192,7 @@ void rc3_init() {
 
     SHK_BIND_HOOK(update_mobys_func, update_mobys_func_hook);
     SHK_BIND_HOOK(pre_game_loop, pre_game_loop_hook);
-    SHK_BIND_HOOK(render, render_hook);
+    //SHK_BIND_HOOK(render, render_hook);
 
     SHK_BIND_HOOK(spawn_moby, spawn_moby_hook);
     SHK_BIND_HOOK(ctf_flag_update_func, ctf_flag_update_func_hook);

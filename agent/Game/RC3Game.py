@@ -1,4 +1,5 @@
 import ctypes
+import time
 
 import numpy as np
 
@@ -9,6 +10,8 @@ from .Game import Game, Vector3
 class RC3Game(Game):
     offset = 0x300000000
 
+    game_reset_address = 0xcc5188
+
     frame_count_address = 0xcc5180
     frame_progress_address = 0xcc5184
     input_address = 0xcc5200
@@ -18,8 +21,9 @@ class RC3Game(Game):
     player_rotation_address = 0xcd000c
     player_health_address = 0xcd0018
     player_team_id_address = 0xcd001c
+    player_moby_state_address = 0xcd0020
 
-    player_info_size = 0x20
+    player_info_size = 0x24
 
     team_flag_position_address = 0xce0000
     team_flag_state_address = 0xce000c
@@ -52,24 +56,18 @@ class RC3Game(Game):
 
     vidcomic_state_address = 0xda5122
 
-    def __init__(self, player=0, process_name="rpcs3.exe"):
-        super().__init__(process_name)
-
-        self.player = player
+    def __init__(self, pid):
+        super().__init__(pid)
         self.game_key = "rc3"
 
         self.team = -1
 
-    def get_team(self):
+    def get_team(self, player):
         """Get the team of the player."""
-        if self.team == -1:
-            # Read the team from the game state
-            self.team = self.process.read_int(self.player_team_id_address + self.player_info_size * self.player)
+        return self.process.read_int(self.player_team_id_address + self.player_info_size * player)
 
-        return self.team
-
-    def get_health(self):
-        return self.process.read_float(self.player_health_address + self.player_info_size * self.player)
+    def get_health(self, player):
+        return self.process.read_float(self.player_health_address + self.player_info_size * player)
 
     def get_team_health(self, team_id):
         return self.process.read_float(self.team_health_address + self.team_info_size * team_id)
@@ -96,11 +94,37 @@ class RC3Game(Game):
         return self.get_flag_holder(team) != -1
 
     def get_flag_holder(self, team_id) -> int:
-        return self.process.read_int(self.team_flag_holder_address + self.team_info_size * team_id)
+        return self.process.read_int(self.team_flag_holder_address + self.team_info_size * team_id, True)
 
-    def get_player_position(self) -> Vector3:
-        """Player position is stored in big endian, so we need to convert it to little endian."""
-        player_position_buffer = self.process.read_memory(self.player_position_address + self.player_info_size * self.player, 12)
+    def get_team_flag_position(self, team_id) -> Vector3:
+        """
+        Flag position is stored in big endian, so we need to convert it to little endian
+        """
+        team_flag_position_buffer = self.process.read_memory(self.team_flag_position_address + self.team_info_size * team_id, 12)
+
+        if team_flag_position_buffer is None:
+            return Vector3()
+
+        team_flag_position_buffer = (team_flag_position_buffer[3::-1] +
+                                     team_flag_position_buffer[7:3:-1] +
+                                     team_flag_position_buffer[11:7:-1])
+
+        team_flag_position = Vector3()
+        ctypes.memmove(ctypes.byref(team_flag_position), team_flag_position_buffer, ctypes.sizeof(team_flag_position))
+
+        return team_flag_position
+
+    def get_distance_to_team_flag(self, player_id, team_id) -> float:
+        player_position = self.get_player_position(player_id)
+        team_flag_position = self.get_team_flag_position(team_id)
+
+        return player_position.distance_to(team_flag_position)
+
+    def get_player_position(self, player) -> Vector3:
+        """
+        Player position is stored in big endian, so we need to convert it to little endian.
+        """
+        player_position_buffer = self.process.read_memory(self.player_position_address + self.player_info_size * player, 12)
 
         if player_position_buffer is None:
             return Vector3()
@@ -116,13 +140,18 @@ class RC3Game(Game):
 
         return player_position
 
+    def get_player_state(self, player) -> int:
+        return self.process.read_int(self.player_moby_state_address + self.player_info_size * player)
+
     def get_team_score(self, team_id: int) -> int:
         """Get the score of the team."""
         return self.process.read_int(self.team_score_address + self.team_info_size * team_id)
 
-    def get_player_rotation(self) -> Vector3:
-        """Player rotation is stored in big endian, so we need to convert it to little endian."""
-        player_rotation_buffer = self.process.read_memory(self.player_rotation_address + self.player_info_size * self.player, 12)
+    def get_player_rotation(self, player) -> Vector3:
+        """
+        Player rotation is stored in big endian, so we need to convert it to little endian.
+        """
+        player_rotation_buffer = self.process.read_memory(self.player_rotation_address + self.player_info_size * player, 12)
 
         if player_rotation_buffer is None:
             return Vector3()
@@ -159,8 +188,8 @@ class RC3Game(Game):
     def get_hero_state(self):
         return self.process.read_int(self.hero_state_address)
 
-    def set_controller_input(self, controller_input, left_joy_x, left_joy_y, right_joy_x, right_joy_y):
-        self.process.write_int(self.input_address + 0x8 * self.player, controller_input)
+    def set_controller_input(self, player, controller_input, left_joy_x, left_joy_y, right_joy_x, right_joy_y):
+        self.process.write_int(self.input_address + 0x8 * player, controller_input)
 
         # self.joystick_l_x += left_joy_x
         # self.joystick_l_y += left_joy_y
@@ -185,7 +214,10 @@ class RC3Game(Game):
         joystick = joystick | ((int((self.joystick_r_x + 1) * 127) & 0xFF) << 16)
         joystick = joystick | ((int((self.joystick_r_y + 1) * 127) & 0xFF) << 24)
 
-        self.process.write_int(self.joystick_address + 0x8 * self.player, joystick)
+        self.process.write_int(self.joystick_address + 0x8 * player, joystick)
+
+    def reset(self, resets: int):
+        self.process.write_int(self.game_reset_address, resets)
 
     def get_current_frame_count(self):
         frames_buffer = self.process.read_memory(self.frame_count_address, 4)
@@ -297,9 +329,6 @@ class RC3Game(Game):
 
         return [*collisions, *classes, *normals_x, *normals_y, *normals_z]
 
-    def get_health(self):
-        return self.process.read_int(self.health_address)
-
     def set_health(self, health):
         self.process.write_int(self.health_address, health)
 
@@ -315,8 +344,14 @@ class RC3Game(Game):
 
         self.process.write_int(self.frame_progress_address, target_frame)
 
+        start_time = time.time()
+
         while frame_count < target_frame:
             frame_count = self.get_current_frame_count()
+
+            # If we've waited 2 minutes, exit
+            if time.time() - start_time > 120:
+                exit(0)
 
         return True
 

@@ -84,6 +84,11 @@ SHK_FUNCTION_DEFINE_STATIC_5(0x956c0, int, coll_line, Vec4*, position1, Vec4*, p
 SHK_FUNCTION_DEFINE_STATIC_1(0x312380, void, nwConnect, void*, netConnectionInfo);
 SHK_FUNCTION_DEFINE_STATIC_1(0x31ade0, void, nwSetGameSetupFlagsForGameType, int, gameType);
 SHK_FUNCTION_DEFINE_STATIC_0(0x3127c0, void, nwJoin);
+SHK_FUNCTION_DEFINE_STATIC_0(0x313c7c, void, nwLeaveGame);
+SHK_FUNCTION_DEFINE_STATIC_0(0x318370, void, nwResetLobby);
+
+SHK_FUNCTION_DEFINE_STATIC_1(0x31813c, void, nwSetInGame, int, inGame);
+SHK_FUNCTION_DEFINE_STATIC_2(0x14aa54, void, LoadLevel, int, level, int, something);
 
 struct tNW_GameSettings {
     char playerNames[8][32];

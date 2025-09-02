@@ -35,20 +35,20 @@ class RedisHub:
         # Randomly generate worker ID
         self.worker_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
-    def add(self, state_sequence, actions, reward, last_done, logprob, state_value, hidden_state, cell_state):
+    def add(self, player_id, state_sequence, actions, reward, last_done, logprob, state_value):
         transition = Transition(state_sequence, actions, reward, last_done, logprob, state_value, None, None)
         # transition = Transition(state_sequence, actions, reward, last_done, logprob, state_value, hidden_state.squeeze(), cell_state.squeeze())
-        message = TransitionMessage(transition, self.worker_id)
+        message = TransitionMessage(transition, f"{self.worker_id}-{player_id}")
 
         # Pickle the transition and publish it to the "replay_buffer" channel
         data = pickle.dumps(message)
         self.redis.publish(self.key, data)
 
     def get_latest_model(self):
-        model_timestamp = self.redis.get("rac1.kerwan.model_timestamp")
+        model_timestamp = self.redis.get("rac3.ctf.model_timestamp")
         if model_timestamp is not None and float(model_timestamp) > self.latest_model:
             # Load the latest model from Redis
-            model_pickled = self.redis.get("rac1.kerwan.model")
+            model_pickled = self.redis.get("rac3.ctf.model")
             if model_pickled is not None:
                 self.model = pickle.loads(model_pickled)
                 self.latest_model = float(model_timestamp)
@@ -56,14 +56,14 @@ class RedisHub:
         return self.model
 
     def get_model(self):
-        model_pickle = self.redis.get("rac1.kerwan.model")
+        model_pickle = self.redis.get("rac3.ctf.model")
         if model_pickle is not None:
             return pickle.loads(model_pickle)
 
         return None
 
     def get_optimizer(self):
-        optimizer_pickle = self.redis.get("rac1.kerwan.optimizer")
+        optimizer_pickle = self.redis.get("rac3.ctf.optimizer")
         if optimizer_pickle is not None:
             return pickle.loads(optimizer_pickle)
 
@@ -73,10 +73,10 @@ class RedisHub:
         """
         Gets the latest model if we don't already have it, otherwise None
         """
-        model_timestamp = self.redis.get("rac1.kerwan.model_timestamp")
+        model_timestamp = self.redis.get("rac3.ctf.model_timestamp")
         if model_timestamp is not None and float(model_timestamp) > self.latest_model:
             # Load the latest model from Redis
-            model_pickled = self.redis.get("rac1.kerwan.model")
+            model_pickled = self.redis.get("rac3.ctf.model")
             if model_pickled is not None:
                 self.model = pickle.loads(model_pickled)
                 self.latest_model = float(model_timestamp)
@@ -91,9 +91,9 @@ class RedisHub:
         optimizer = pickle.dumps(agent.optimizer.state_dict())
         self.model = pickle.dumps(agent.policy.state_dict())
 
-        self.redis.set("rac1.kerwan.model", self.model)
-        self.redis.set("rac1.kerwan.optimizer", optimizer)
-        self.redis.set("rac1.kerwan.model_timestamp", time.time())
+        self.redis.set("rac3.ctf.model", self.model)
+        self.redis.set("rac3.ctf.optimizer", optimizer)
+        self.redis.set("rac3.ctf.model_timestamp", time.time())
 
     def save_model_to_file(self, agent: PPOAgent, filename):
             torch.save({
@@ -152,19 +152,19 @@ class RedisHub:
         return self.buffer_full
 
     def get_action_mask(self):
-        mask = self.redis.get("rac1.kerwan.action_mask")
+        mask = self.redis.get("rac3.ctf.action_mask")
         if mask is not None:
             return torch.tensor(pickle.loads(mask), dtype=torch.bfloat16, device=self.device)
 
         return None
 
     def set_action_mask(self, mask):
-        self.redis.set("rac1.kerwan.action_mask", pickle.dumps(mask))
+        self.redis.set("rac3.ctf.action_mask", pickle.dumps(mask))
 
     def listen_for_messages(self, agent: PPOAgent):
         # Subscribe to the "replay_buffer" channel
         pubsub = self.redis.pubsub()
-        pubsub.subscribe("rac1.kerwan.rollout_buffer")
+        pubsub.subscribe("rac3.ctf.rollout_buffer")
 
         # Start listening for messages
         try:
@@ -203,14 +203,8 @@ class RedisHub:
                             transition.reward,
                             transition.done,
                             transition.logprob,
-                            transition.state_value,
-                            # replay_buffer.hidden_state,
-                            # replay_buffer.cell_state
-                            None, None
+                            transition.state_value
                         )
-
-                        # replay_buffer.hidden_state = transition.hidden_state
-                        # replay_buffer.cell_state = transition.cell_state
 
         except IndexError as e:
             print(e)

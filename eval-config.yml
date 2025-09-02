@@ -69,7 +69,7 @@ VFS:
   Disk cache maximum size (MB): 5120
   Empty /dev_hdd0/tmp/: true
 Video:
-  Renderer: OpenGL
+  Renderer: Vulkan
   Resolution: 1280x720
   Aspect ratio: 16:9
   Frame limit: 60
@@ -223,7 +223,7 @@ Savestate:
   Save Disc Game Data: false
 Miscellaneous:
   Automatically start games after boot: true
-  Exit RPCS3 when process finishes: false
+  Exit RPCS3 when process finishes: true
   Pause emulation on RPCS3 focus loss: false
   Start games in fullscreen mode: false
   Prevent display sleep while running games: true

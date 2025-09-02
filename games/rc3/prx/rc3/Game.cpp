@@ -17,6 +17,7 @@
 
 #define custom_frame_count *((int*)0xcc5180)
 #define progress_frame_count *((int*)0xcc5184)
+#define game_reset *((int*)0xcc5188)
 
 struct RaycastInfo {
     float distances[64];
@@ -27,10 +28,11 @@ struct RaycastInfo {
 };
 
 struct PlayerInfo {
-    Vec3 position;
-    Vec3 rotation;
-    float health;
-    int team_id;
+    /* 0x0  */ Vec3 position;
+    /* 0xc  */ Vec3 rotation;
+    /* 0x18 */ float health;
+    /* 0x1c */ int team_id;
+	/* 0x20 */ int moby_state;
 };
 
 struct TeamInfo {
@@ -114,6 +116,8 @@ void Game::on_game_start() {
     // Loads into multiplayer
     destination_level = 0x27;
     load_level = 1;
+
+	resets = 0;
 }
 
 void Game::flag_update(Moby* flag_moby) {
@@ -129,50 +133,74 @@ void Game::flag_update(Moby* flag_moby) {
     team_info->flag_position.z = flag_moby->pos.z;
 }
 
+void Game::reset_game() {
+	multiplayer_level = 6;
+    is_local_multiplayer = 1;
+    num_local_players = 4;
+
+    nwSetGameSetupFlagsForGameType(1);
+
+    nwConnect(nullptr);
+    nwJoin();
+
+    player1_controller_ptr = (void*)0xd992c0;
+    player2_controller_ptr = (void*)0xd99824;
+    player3_controller_ptr = (void*)0xd99d88;
+    player4_controller_ptr = (void*)0xd9a2ec;
+
+    game_settings->gameType = 1;
+    game_settings->altGameType = 0;
+    game_settings->level = 46;
+    game_settings->unk2 = 4;
+    game_settings->numPlayers = 4;
+    game_settings->ctfCap = 255;
+    game_settings->showPlayerNames = true;
+    game_settings->startWithChargeboots = true;
+    game_settings->shizzolate = true;
+
+    game_settings->playerTeams[0] = 0;
+    game_settings->playerTeams[1] = 0;
+    game_settings->playerTeams[2] = 1;
+    game_settings->playerTeams[3] = 1;
+
+    sprintf((char*)&game_settings->playerNames[0], "Ben");
+    sprintf((char*)&game_settings->playerNames[1], "Jen");
+    sprintf((char*)&game_settings->playerNames[2], "Ken");
+    sprintf((char*)&game_settings->playerNames[3], "Len");
+
+    destination_level = 46;
+    load_level = 1;
+    lobby_mode = 2;
+
+	resets = game_reset;
+}
+
+#define who_knows *((int*)0xee933c)
+#define widget_layers *((int*)0xcaa090)
+
 void Game::on_tick() {
+	if (game_reset != resets) {
+		resets = game_reset;
+
+		// Not setting either of these makes the game not reload at all
+		lobby_mode = 5;
+		who_knows = 0;
+
+		widget_layers = 0;  // Causes a crash after 10 resets if not set to 0
+
+		LoadLevel(0x27, 1);
+
+		return;
+	}
+
     if (current_level < 30) {
         return;
     }
 
     if (current_level != 46) {
-        multiplayer_level = 6;
-        is_local_multiplayer = 1;
-        num_local_players = 4;
+		this->reset_game();
 
-        nwSetGameSetupFlagsForGameType(1);
-
-        nwConnect(nullptr);
-        nwJoin();
-
-        player1_controller_ptr = (void*)0xd992c0;
-        player2_controller_ptr = (void*)0xd99824;
-        player3_controller_ptr = (void*)0xd99d88;
-        player4_controller_ptr = (void*)0xd9a2ec;
-
-        game_settings->gameType = 1;
-        game_settings->altGameType = 0;
-        game_settings->level = 46;
-        game_settings->unk2 = 4;
-        game_settings->numPlayers = 4;
-        game_settings->ctfCap = 255;
-        game_settings->showPlayerNames = true;
-        game_settings->startWithChargeboots = true;
-        game_settings->shizzolate = true;
-
-        game_settings->playerTeams[0] = 0;
-        game_settings->playerTeams[1] = 0;
-        game_settings->playerTeams[2] = 1;
-        game_settings->playerTeams[3] = 1;
-
-        sprintf((char*)&game_settings->playerNames[0], "Ben");
-        sprintf((char*)&game_settings->playerNames[1], "Jen");
-        sprintf((char*)&game_settings->playerNames[2], "Ken");
-        sprintf((char*)&game_settings->playerNames[3], "Len");
-
-        destination_level = 46;
-        load_level = 1;
-        lobby_mode = 2;
-        return;
+		return;
     }
 
     TEAM_INFO[0].team_health = 0;
@@ -194,76 +222,14 @@ void Game::on_tick() {
         player_info->rotation.z = moby->rot.z;
 
         player_info->health = team_data[player_id].health;
-        player_info->team_id = team_data[player_id].team_id;
+        player_info->team_id = game_settings->playerTeams[player_id];
+
+		player_info->moby_state = (int)team_data[player_id].state;
 
         TEAM_INFO[player_info->team_id].team_health += player_info->health;
-
-//        // Raycast in a grid pattern extending from the player with the given fov
-//        // We also oscillate the rays to the left and right to get a wider field of view
-//        Vec4 forward = moby->forward;
-//        forward.x = moby->forward.z;
-//        forward.y = moby->right.z;
-//        forward.z = moby->up.z;
-//        forward.w = 1;
-//
-//        Vec4 left = Vec4();
-//        left.x = moby->forward.x;
-//        left.y = moby->right.x;
-//        left.z = moby->up.x;
-//        left.w = 1;
-//
-//        Vec4 up = moby->up;
-//        up.x = moby->forward.y;
-//        up.y = moby->right.y;
-//        up.z = moby->up.y;
-//
-//        float ray_distance = 64.0f;
-//        float ray_wide = 90.0f;
-//
-//        float fov = 64.0f;
-//        int rows = 8;
-//        int cols = 8;
-//
-//        // Store camera collision and set it to null
-//        unsigned short *collision;
-//        RaycastInfo* info = &raycast_info[playerId];
-//        for (int i = 0; i < rows; i++) {
-//            for (int j = 0; j < cols; j++) {
-//                Vec4 ray = Vec4();
-//                ray.x = moby->pos.x + ray_distance * forward.x + (ray_wide * (j - cols/2) / cols) * left.x + (ray_wide * (i - rows/2) / rows) * up.x;
-//                ray.y = moby->pos.y + ray_distance * forward.y + (ray_wide * (j - cols/2) / cols) * left.y + (ray_wide * (i - rows/2) / rows) * up.y;
-//                ray.z = moby->pos.z + ray_distance * forward.z + (ray_wide * (j - cols/2) / cols) * left.z + (ray_wide * (i - rows/2) / rows) * up.z;
-//                ray.w = moby->pos.w;
-//
-//                Vec4 ray_start = moby->pos;
-//
-//                int coll = coll_line(&moby->pos, &ray, 0, nullptr, nullptr);
-//
-////                Moby* test_moby = nullptr;
-////
-////                //if (should_render) {
-////                //    test_moby = (Moby *)collisions_mobys[i * cols + j];
-////                //}
-//
-//                if (coll) {
-//                    info->distances[i * cols + j] = distance(moby->pos, coll_output.ip);
-//                    info->classes[i * cols + j] = -2 - (int)(coll_output.poly & 0x1fU);
-//                    info->normals_z[i * cols + j] = coll_output.normal.x;
-//                    info->normals_y[i * cols + j] = coll_output.normal.y;
-//                    info->normals_z[i * cols + j] = coll_output.normal.z;
-//
-//                    if (coll_output.pMoby) {
-//                        info->classes[i * cols + j] = coll_output.pMoby->o_class;
-//                    }
-//                } else {
-//                    info->distances[i * cols + j] = -32.0f;
-//                    info->classes[i * cols + j] = -128;
-//                }
-//            }
-//        }
     }
 
-//    while (progress_frame_count < custom_frame_count && current_level != 0) {}
+    while (progress_frame_count < custom_frame_count && current_level != 0) {}
     custom_frame_count += 1;
 }
 

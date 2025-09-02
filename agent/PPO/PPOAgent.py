@@ -66,11 +66,11 @@ class PPOAgent:
     def load_policy_dict(self, policy):
         self.policy.load_state_dict(policy)
 
-    def choose_action(self, state_sequence: torch.Tensor):
+    def choose_action(self, state: torch.Tensor):
         with torch.no_grad():
             self.policy.eval()
 
-            action, action_logprob, state_value = self.policy.act(state_sequence, self.action_mask)
+            action, action_logprob, state_value = self.policy.act(state, self.action_mask)
 
         return action, action_logprob, state_value
 
@@ -169,7 +169,7 @@ class PPOAgent:
                     # cell_states = cell_states[0].clone().permute(1, 0, 2).to(self.device)
 
                     # Evaluating old actions and values
-                    logprobs, state_values, dist_entropy = self.policy.evaluate(states, actions, self.action_mask, None, None)
+                    logprobs, state_values, dist_entropy = self.policy.evaluate(states, actions, self.action_mask)
 
                     advantages, returns = self.compute_returns_and_advantages(
                         _rewards.detach(), dones.detach(), state_values.squeeze().detach(), state_values[-1].detach(), dones[-1].detach()

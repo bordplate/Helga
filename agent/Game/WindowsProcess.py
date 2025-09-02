@@ -49,6 +49,7 @@ class Process:
         if ReadProcessMemory(self.process_handle, address, buffer, size, ctypes.byref(bytes_read)):
             return buffer.raw
         else:
+            exit(0)
             return None
 
     def write_memory(self, address, data):
