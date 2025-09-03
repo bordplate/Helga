@@ -13,7 +13,7 @@ from PPO.PPOAgent import PPOAgent
 
 from RedisHub import RedisHub
 
-features = 43
+features = 53
 sequence_length = 1
 
 configuration = {
@@ -95,7 +95,7 @@ def start_worker(args):
 
         states = []
 
-        player_states = env.reset()
+        player_states, _ = env.reset()
         for state in player_states:
             states += [state[0].to(device)]
 
@@ -136,14 +136,14 @@ def start_worker(args):
                 player_logprobs += [logprob]
                 player_values += [state_value]
 
-            new_states = env.step(player_actions)
+            new_states, terminal = env.step(player_actions)
 
             states = []
 
             done = False
 
             for player_id in range(4):
-                state, reward, terminal = new_states[player_id]
+                state, reward = new_states[player_id]
                 #if terminal and not eval_mode:
                 if terminal:
                     done = True
@@ -164,7 +164,7 @@ def start_worker(args):
                 print(f"\rP1: %6.2f; P2: %6.2f; P3: %6.2f; P4: %6.2f    sps: %3.2f; timeout: %.2f         " % (
                     rewards[0], rewards[1], rewards[2], rewards[3],
                     steps_per_second,
-                    env.timeout / 30
+                    env.timeout / 15
                 ), end="")
 
             if done:

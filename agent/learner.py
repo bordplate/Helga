@@ -16,7 +16,7 @@ from util import update_graph_html
 class Config:
     learning_rate_critic    = 3e-4
     learning_rate_actor     = 3e-4
-    features                = 43
+    features                = 53
     actions                 = 6
     buffer_size             = 1024 * 30 * 3
     batch_size              = 1024 * 30

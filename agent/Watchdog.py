@@ -5,6 +5,8 @@ import os
 import ctypes
 import subprocess
 
+import signal
+
 import psutil
 
 from Game.RC1Game import RC1Game
@@ -12,6 +14,11 @@ from Game.RC1Game import RC1Game
 # Define the prctl function from the C library
 #libc = ctypes.CDLL('libc.so.6')
 #PR_SET_NAME = 15
+
+
+def set_pdeathsig(sig=signal.SIGTERM):
+    libc = ctypes.CDLL("libc.so.6")
+    libc.prctl(1, sig)  # PR_SET_PDEATHSIG = 1
 
 
 class Watchdog:
@@ -37,7 +44,7 @@ class Watchdog:
         import sys
         if "pydevd" in sys.modules and "--force-watchdog" not in sys.argv:
             print("Watchdog: Not starting watchdog because we're running in PyCharm debug mode.")
-            return
+            return False
 
         print("Starting RPCS3...")
         import subprocess
@@ -58,7 +65,8 @@ class Watchdog:
                 ],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
+                preexec_fn=set_pdeathsig
             )
 
             self.rpcs3_path = "/usr/bin/rpcs3"
@@ -118,9 +126,9 @@ class Watchdog:
         print(f"Watching environment for stalls and crashes...")
 
         # Make a new thread to watch the environment
-        thread = threading.Thread(target=self.run, args=())
-        thread.daemon = True
-        thread.start()
+        # thread = threading.Thread(target=self.run, args=())
+        # thread.daemon = True
+        # thread.start()
 
     def run(self):
         if self.env is None:

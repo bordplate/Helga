@@ -163,6 +163,11 @@ void Game::reset_game() {
     game_settings->playerTeams[2] = 1;
     game_settings->playerTeams[3] = 1;
 
+	game_settings->playerSkins[0] = 2;
+	game_settings->playerSkins[1] = 3;
+	game_settings->playerSkins[2] = 4;
+	game_settings->playerSkins[3] = 5;
+
     sprintf((char*)&game_settings->playerNames[0], "Ben");
     sprintf((char*)&game_settings->playerNames[1], "Jen");
     sprintf((char*)&game_settings->playerNames[2], "Ken");
