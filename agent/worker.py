@@ -13,7 +13,7 @@ from PPO.PPOAgent import PPOAgent
 
 from RedisHub import RedisHub
 
-features = 53
+features = 55
 sequence_length = 1
 
 configuration = {

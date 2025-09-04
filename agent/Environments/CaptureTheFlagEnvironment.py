@@ -20,6 +20,7 @@ class CaptureTheFlagEnvironment(RatchetEnvironment):
         self.timeout = 30 * 30
         self.last_flag_holder = [-1, -1]
         self.closest_flag_distances = [9999.0, 9999.0, 9999.0, 9999.0]
+        self.death_timers = [0, 0, 0, 0]
 
     def reset(self):
         self.game.reset(self.resets)
@@ -30,6 +31,7 @@ class CaptureTheFlagEnvironment(RatchetEnvironment):
         self.last_flag_holder = [-1, -1]
 
         self.closest_flag_distances = [9999.0, 9999.0, 9999.0, 9999.0]
+        self.death_timers = [0, 0, 0, 0]
 
         self.resets += 1
 
@@ -156,7 +158,7 @@ class CaptureTheFlagEnvironment(RatchetEnvironment):
                 player_rotation,
                 self.game.get_health(player_id),
                 self.game.get_player_state(player_id),
-            ]] 
+            ]]
 
         returns = []
 
@@ -171,6 +173,8 @@ class CaptureTheFlagEnvironment(RatchetEnvironment):
             player = data[player_id]
             team_id = player["team_id"]
             other_team_id = player["other_team_id"]
+
+            speed = self.game.get_player_speed(player_id) / 0.43
 
             teammate_id = -1
             enemy_1 = -1
@@ -191,6 +195,8 @@ class CaptureTheFlagEnvironment(RatchetEnvironment):
                 enemy_1 = 0
                 enemy_2 = 1
 
+            health = self.game.get_health(player_id)
+
             enemy_flag_position = last_red_flag_position if team_id == 0 else last_blue_flag_position
             team_flag_position = last_blue_flag_position if team_id == 0 else last_red_flag_position
 
@@ -202,6 +208,9 @@ class CaptureTheFlagEnvironment(RatchetEnvironment):
             new_flag_distance = self.game.get_player_position(player_id).distance_to(team_flag_position)
             new_enemy_flag_distance = self.game.get_player_position(player_id).distance_to(enemy_flag_position)
 
+            flag_speed = (1 - new_flag_distance / player["flag_distance"]) / 0.2
+            enemy_flag_speed = (1 - new_enemy_flag_distance / player["enemy_flag_distance"]) / 0.2
+
             # The return point for a captured flag is your own team's flag.
             # We want to reward the flag holder for going back, but not the "idle" teammate, unless the enemy team has
             #   captured the flag, then we want to reward both agents for going after the flag.
@@ -210,12 +219,12 @@ class CaptureTheFlagEnvironment(RatchetEnvironment):
             enemy_flag_holder = self.game.get_flag_holder(team_id)
 
             if (player["enemy_has_flag"] or player_id == flag_holder) and new_flag_distance < player["flag_distance"]:
-                reward += self.reward("return_flag_distance", 0.025)
+                reward += self.reward("return_flag_distance", 0.025 * flag_speed)
 
             if (not player["team_has_flag"] and new_enemy_flag_distance < self.closest_flag_distances[player_id] and
                     new_enemy_flag_distance < player["enemy_flag_distance"]):
                 self.closest_flag_distances[player_id] = new_enemy_flag_distance
-                reward += self.reward("flag_distance", 0.05)
+                reward += self.reward("flag_distance", 0.05 * enemy_flag_speed)
 
             if team_flag_reset:
                 reward += self.reward("flag_reset", 2.5)
@@ -247,8 +256,13 @@ class CaptureTheFlagEnvironment(RatchetEnvironment):
             if player["enemy_has_flag"]:  # Constant penalty for the enemy having the flag
                 reward += self.reward("enemy_flag_penalty", -0.01)
 
-            if player["health"] > self.game.get_health(player_id):
+            if player["health"] > health:
                 reward += self.reward("health_penalty", -0.2)
+
+            if health <= 0:
+                self.death_timers[player_id] += 1
+            elif self.death_timers[player_id] > 0 and health > 0:
+                self.death_timers[player_id] = 0
 
             if self.game.get_team_health(other_team_id) < player["other_team_health"]:
                 self.timeout = 30 * 30
@@ -273,11 +287,12 @@ class CaptureTheFlagEnvironment(RatchetEnvironment):
             enemy_flag_position = self.game.get_team_flag_position(player["other_team_id"])
 
             last_player_position = player["last_position"]
-            last_player_rotation = player["last_rotation"]
 
             player_x = player_info[player_id][0].x
             player_y = player_info[player_id][0].y
             player_z = player_info[player_id][0].z
+
+            camera_forward = self.game.get_player_camera_forward(player_id)
 
             # Normalize all state values
             state = [
@@ -291,6 +306,8 @@ class CaptureTheFlagEnvironment(RatchetEnvironment):
                 np.interp(enemy_got_flag, (0, 1), (-1, 1)),
                 np.interp(player["team_has_flag"], (-1, 3), (-1, 1)),
                 np.interp(player["enemy_has_flag"], (-1, 3), (-1, 1)),
+                speed,
+                np.interp(self.death_timers[player_id], (0, 1000), (0, 1)),
 
                 np.interp(player_x, (-500, 500), (-1, 1)),
                 np.interp(player_y, (-500, 500), (-1, 1)),
@@ -299,12 +316,11 @@ class CaptureTheFlagEnvironment(RatchetEnvironment):
                 np.interp(player_info[player_id][1].y, (-4, 4), (-1, 1)),
                 np.interp(player_info[player_id][1].z, (-4, 4), (-1, 1)),
 
-                np.interp(last_player_position.x, (-500, 500), (-1, 1)),
-                np.interp(last_player_position.y, (-500, 500), (-1, 1)),
-                np.interp(last_player_position.z, (-500, 500), (-1, 1)),
-                np.interp(last_player_rotation.x, (-4, 4), (-1, 1)),
-                np.interp(last_player_rotation.y, (-4, 4), (-1, 1)),
-                np.interp(last_player_rotation.z, (-4, 4), (-1, 1)),
+                np.interp(player_x - last_player_position.x, (-500, 500), (-1, 1)),
+                np.interp(player_y - last_player_position.y, (-500, 500), (-1, 1)),
+                np.interp(player_z - last_player_position.z, (-500, 500), (-1, 1)),
+
+                camera_forward.x, camera_forward.y, camera_forward.z,
 
                 np.interp(player_info[player_id][2], (0, 15), (0, 1)),
                 np.interp(player_info[player_id][3], (0, 256), (0, 1)),
@@ -384,7 +400,7 @@ if __name__ == '__main__':
         rewards = [0.0, 0.0, 0.0, 0.0]
 
         while True:
-            _state = env.step([
+            _state, _ = env.step([
                 [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
                 [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
                 [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -401,7 +417,10 @@ if __name__ == '__main__':
             elapsed         = time.time() - start_time
             fps             = frames_rendered / elapsed if elapsed > 0 else 0.0
 
-            print(f"\rFrame count: {current_frame} | FPS: {fps:6.2f} | Reward: {rewards[3]}", end="")
+            camera_fwd = env.game.get_player_camera_forward(1)
+            speed = env.game.get_player_speed(1) / 0.43
+
+            # print(f"\rFrame count: {current_frame} | FPS: {fps:6.2f} | Reward: {rewards[3]} | {camera_fwd.x}, {camera_fwd.y}, {camera_fwd.z} | {speed} | {env.death_timers[1]}", end="")
             # print(f"\rState: {env.game.get_player_state(0)} | Health: {env.game.get_health(2)}", end="")
 
             # print(" ".join(["{:.1f}".format(x) for x in _state]), end="\r")

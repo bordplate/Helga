@@ -16,7 +16,7 @@ from util import update_graph_html
 class Config:
     learning_rate_critic    = 3e-4
     learning_rate_actor     = 3e-4
-    features                = 53
+    features                = 55
     actions                 = 6
     buffer_size             = 1024 * 30 * 3
     batch_size              = 1024 * 30
@@ -32,7 +32,7 @@ class Config:
     lambda_gae              = 0.9
     critic_loss_coeff       = 1.0
     # kl_threshold            = 0.025
-    kl_threshold            = 0.01
+    kl_threshold            = 0.2
 
     @staticmethod
     def serialize():

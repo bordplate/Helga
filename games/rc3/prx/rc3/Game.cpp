@@ -33,6 +33,8 @@ struct PlayerInfo {
     /* 0x18 */ float health;
     /* 0x1c */ int team_id;
 	/* 0x20 */ int moby_state;
+	/* 0x24 */ float speed;
+	/* 0x28 */ struct Vec3 camera_forward;
 };
 
 struct TeamInfo {
@@ -171,7 +173,7 @@ void Game::reset_game() {
     sprintf((char*)&game_settings->playerNames[0], "Ben");
     sprintf((char*)&game_settings->playerNames[1], "Jen");
     sprintf((char*)&game_settings->playerNames[2], "Ken");
-    sprintf((char*)&game_settings->playerNames[3], "Len");
+    sprintf((char*)&game_settings->playerNames[3], "Ren");
 
     destination_level = 46;
     load_level = 1;
@@ -225,6 +227,12 @@ void Game::on_tick() {
         player_info->rotation.x = moby->rot.x;
         player_info->rotation.y = moby->rot.y;
         player_info->rotation.z = moby->rot.z;
+
+		player_info->speed = team_data[player_id].speed;
+
+		player_info->camera_forward.x = team_data[player_id].camera_forward.x;
+		player_info->camera_forward.y = team_data[player_id].camera_forward.y;
+		player_info->camera_forward.z = team_data[player_id].camera_forward.z;
 
         player_info->health = team_data[player_id].health;
         player_info->team_id = game_settings->playerTeams[player_id];

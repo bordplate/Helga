@@ -144,7 +144,7 @@ int32_t cellPadGetDataRedirectHook(uint32_t port_no, CellPadData *data) {
 	memcpy(&last_pressed_buttons, (void*)(last_remote_pressed_buttons + 0x8 * port_no), 4);
 
 	//if (port_no == 0) {
-	//	return ret;
+		//return ret;
 	//}
 
     //if (port_no == 0) {

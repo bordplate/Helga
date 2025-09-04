@@ -22,8 +22,10 @@ class RC3Game(Game):
     player_health_address = 0xcd0018
     player_team_id_address = 0xcd001c
     player_moby_state_address = 0xcd0020
+    player_speed_address = 0xcd0024
+    player_camera_forward_address = 0xcd0028
 
-    player_info_size = 0x24
+    player_info_size = 0x34
 
     team_flag_position_address = 0xce0000
     team_flag_state_address = 0xce000c
@@ -140,8 +142,31 @@ class RC3Game(Game):
 
         return player_position
 
+    def get_player_camera_forward(self, player_id) -> Vector3:
+        """
+        Camera forward is stored in big endian, so we need to convert it to little endian.
+        """
+        camera_forward_buffer = self.process.read_memory(self.player_camera_forward_address + self.player_info_size * player_id, 12)
+
+        if camera_forward_buffer is None:
+            return Vector3()
+
+        camera_forward_buffer = (
+            camera_forward_buffer[3::-1] +
+            camera_forward_buffer[7:3:-1] +
+            camera_forward_buffer[11:7:-1]
+        )
+
+        camera_forward = Vector3()
+        ctypes.memmove(ctypes.byref(camera_forward), camera_forward_buffer, ctypes.sizeof(camera_forward))
+
+        return camera_forward
+
     def get_player_state(self, player) -> int:
         return self.process.read_int(self.player_moby_state_address + self.player_info_size * player)
+
+    def get_player_speed(self, player) -> float:
+        return self.process.read_float(self.player_speed_address + self.player_info_size * player)
 
     def get_team_score(self, team_id: int) -> int:
         """Get the score of the team."""
