@@ -234,10 +234,10 @@ class RC3Game(Game):
 
         joystick = 0
 
-        joystick = joystick | (int((self.joystick_l_x + 1) * 127) & 0xFF)
-        joystick = joystick | ((int((self.joystick_l_y + 1) * 127) & 0xFF) << 8)
-        joystick = joystick | ((int((self.joystick_r_x + 1) * 127) & 0xFF) << 16)
-        joystick = joystick | ((int((self.joystick_r_y + 1) * 127) & 0xFF) << 24)
+        joystick = joystick | (int((self.joystick_r_x + 1) * 127) & 0xFF)
+        joystick = joystick | ((int((self.joystick_r_y + 1) * 127) & 0xFF) << 8)
+        joystick = joystick | ((int((self.joystick_l_x + 1) * 127) & 0xFF) << 16)
+        joystick = joystick | ((int((self.joystick_l_y + 1) * 127) & 0xFF) << 24)
 
         self.process.write_int(self.joystick_address + 0x8 * player, joystick)
 
